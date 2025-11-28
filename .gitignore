@@ -1,0 +1,41 @@
+# Environment
+.env
+*.p8
+adapter_training_toolkit_v*/
+venv/
+.python-version
+
+# Data files (large, generated)
+data/
+checkpoints/
+exports/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Backup files
+*.bak
+*.backup
+
+# Logs
+*.log

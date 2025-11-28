@@ -1,0 +1,13 @@
+# Data preparation dependencies
+# Install with: pip install -r requirements.txt
+
+# API clients
+anthropic>=0.40.0
+requests>=2.31.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# CLI and formatting
+rich>=13.0.0
+tqdm>=4.66.0
