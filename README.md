@@ -1,5 +1,8 @@
 # NOTAM Adapter Training
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](.python-version)
+
 Train a Foundation Models LoRA adapter to extract structured runway performance data from raw NOTAM text.
 
 ## Quick Start
