@@ -1,15 +1,3 @@
-# Environment
-.env
-*.p8
-adapter_training_toolkit_v*/
-venv/
-.python-version
-
-# Data files (large, generated)
-data/
-checkpoints/
-exports/
-
 # Python
 __pycache__/
 *.py[cod]
@@ -21,17 +9,21 @@ __pycache__/
 dist/
 build/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+# Environment
+venv/
+.env
+.python-version
 
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
+# Signing keys
+*.p8
+
+# Adapter training toolkit (downloaded)
+adapter_training_toolkit_v*/
+
+# Data files (large, generated)
+data/
+checkpoints/
+exports/
 
 # Backup files
 *.bak
