@@ -46,7 +46,18 @@ INCLUSION_KEYWORDS = {
 }
 
 # Keywords for NOTAMs that should be excluded UNLESS they also contain runway keywords
-NAVIGATION_KEYWORDS = {"ILS", "VOR", "GPS", "NDB", "DME", "RNAV", "LOC", "GS", "PAPI", "VASI"}
+NAVIGATION_KEYWORDS = {
+    "ILS",
+    "VOR",
+    "GPS",
+    "NDB",
+    "DME",
+    "RNAV",
+    "LOC",
+    "GS",
+    "PAPI",
+    "VASI",
+}
 PROCEDURE_KEYWORDS = {"APCH", "APPROACH", "DEP", "DEPARTURE", "SID", "STAR", "IAP"}
 TAXIWAY_ONLY_PATTERN = re.compile(r"\bTWY\b(?!.*\bRWY\b)", re.IGNORECASE)
 
@@ -171,7 +182,7 @@ def main():
         return
 
     print(f"Loading NOTAMs from {INPUT_FILE}...")
-    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+    with open(INPUT_FILE, encoding="utf-8") as f:
         notams = json.load(f)
 
     print(f"Loaded {len(notams)} NOTAMs")
@@ -195,8 +206,8 @@ def main():
     print("Filtering Complete!")
     print("=" * 60)
     print(f"Total NOTAMs: {len(notams)}")
-    print(f"Relevant: {len(relevant)} ({100*len(relevant)/len(notams):.1f}%)")
-    print(f"Excluded: {len(excluded)} ({100*len(excluded)/len(notams):.1f}%)")
+    print(f"Relevant: {len(relevant)} ({100 * len(relevant) / len(notams):.1f}%)")
+    print(f"Excluded: {len(excluded)} ({100 * len(excluded) / len(notams):.1f}%)")
 
     print("\nExclusion reasons:")
     for reason, count in sorted(exclusion_reasons.items(), key=lambda x: -x[1]):

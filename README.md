@@ -25,7 +25,7 @@ Train a Foundation Models LoRA adapter to extract structured runway performance 
 
 This pipeline trains a custom LoRA adapter for Apple's Foundation Models framework to parse NOTAMs and extract runway performance data.
 
-```
+```text
 [NOTAM API] → [Filter] → [Label with Claude] → [Train] → [Export] → [Upload]
 ```
 
@@ -61,6 +61,7 @@ cp .env.example .env
 ```
 
 Required variables:
+
 - `ANTHROPIC_API_KEY` - For Claude-based labeling
 - `TOOLKIT_PATH` - Path to Apple's toolkit
 - `ASC_ISSUER_ID`, `ASC_KEY_ID`, `ASC_PRIVATE_KEY_PATH` - App Store Connect API credentials
@@ -88,9 +89,11 @@ Or run individual steps:
 ```
 
 Options:
+
 - `--export-only` - Export existing checkpoint without training
 
 Environment variables:
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TOOLKIT_PATH` | required | Apple toolkit location |
@@ -99,6 +102,7 @@ Environment variables:
 | `LEARNING_RATE` | 1e-3 | Learning rate |
 
 For memory issues:
+
 ```bash
 BATCH_SIZE=1 ./train_adapter.sh
 ```
@@ -110,9 +114,11 @@ BATCH_SIZE=1 ./train_adapter.sh
 ```
 
 Options:
+
 - `--dry-run` - Validate without uploading
 
 The script uses the App Store Connect API to:
+
 1. Create/find an asset pack
 2. Create a new version
 3. Upload the adapter
@@ -121,13 +127,14 @@ The script uses the App Store Connect API to:
 ### Required Entitlement
 
 Request the **Foundation Models Framework Adapter Entitlement** from Apple before shipping:
+
 1. Go to [Apple Developer Account](https://developer.apple.com/account)
 2. Certificates, Identifiers & Profiles → Identifiers
 3. Select your App ID → Request entitlement
 
 ## Directory Structure
 
-```
+```text
 ├── setup.sh               # Environment setup
 ├── prepare_data.sh        # Data preparation pipeline
 ├── train_adapter.sh       # Training script

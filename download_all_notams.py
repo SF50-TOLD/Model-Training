@@ -122,7 +122,7 @@ def main():
         locations[loc] = locations.get(loc, 0) + 1
 
     print(f"Unique airports: {len(locations)}")
-    print(f"\nTop 10 airports by NOTAM count:")
+    print("\nTop 10 airports by NOTAM count:")
     for loc, count in sorted(locations.items(), key=lambda x: -x[1])[:10]:
         print(f"  {loc}: {count}")
 

@@ -139,10 +139,7 @@ async def extract_notam_data(notam: dict) -> dict | None:
             extraction = [extraction]
 
         # Calculate minimum confidence across all runway entries
-        min_confidence = min(
-            (entry.get("confidence", 1.0) for entry in extraction),
-            default=1.0
-        )
+        min_confidence = min((entry.get("confidence", 1.0) for entry in extraction), default=1.0)
 
         return {
             "notam_id": notam.get("notam_id"),
@@ -172,7 +169,7 @@ async def main():
         return
 
     print(f"Loading NOTAMs from {INPUT_FILE}...")
-    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+    with open(INPUT_FILE, encoding="utf-8") as f:
         notams = json.load(f)
 
     print(f"Loaded {len(notams)} NOTAMs to process")
@@ -199,10 +196,10 @@ async def main():
     for result in results:
         print(f"\n{result['notam_id']} ({result['icao_location']}):")
         print(f"  NOTAM: {result['notam_text'][:60]}...")
-        for i, entry in enumerate(result['runway_entries']):
-            runway = entry.get('runway') or 'null'
-            closed = '[CLOSED]' if entry.get('runwayClosed') else ''
-            print(f"  Entry {i+1}: Runway {runway} {closed} (confidence: {entry.get('confidence')})")
+        for i, entry in enumerate(result["runway_entries"]):
+            runway = entry.get("runway") or "null"
+            closed = "[CLOSED]" if entry.get("runwayClosed") else ""
+            print(f"  Entry {i + 1}: Runway {runway} {closed} (confidence: {entry.get('confidence')})")
 
 
 if __name__ == "__main__":

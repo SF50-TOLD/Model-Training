@@ -28,7 +28,9 @@ if ! command -v pyenv &> /dev/null; then
     echo "  brew install pyenv pyenv-virtualenv"
     echo ""
     echo "Then add to your shell config:"
+    # shellcheck disable=SC2016  # literal instructions for the user to copy into their shell config
     echo '  eval "$(pyenv init -)"'
+    # shellcheck disable=SC2016  # literal instructions for the user to copy into their shell config
     echo '  eval "$(pyenv virtualenv-init -)"'
     exit 1
 fi
@@ -41,7 +43,7 @@ eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
 if ! pyenv versions --bare | grep -q "^${PYTHON_VERSION}$"; then
     echo "Python ${PYTHON_VERSION} not installed."
     echo ""
-    read -p "Install Python ${PYTHON_VERSION}? (y/n): " install_python
+    read -rp "Install Python ${PYTHON_VERSION}? (y/n): " install_python
     if [[ "$install_python" == "y" ]]; then
         echo "Installing Python ${PYTHON_VERSION}..."
         pyenv install "${PYTHON_VERSION}"
@@ -54,7 +56,7 @@ fi
 # Check if virtualenv exists
 if pyenv versions --bare | grep -q "^${VENV_NAME}$"; then
     echo "Virtualenv '${VENV_NAME}' already exists."
-    read -p "Recreate it? (y/n): " recreate
+    read -rp "Recreate it? (y/n): " recreate
     if [[ "$recreate" == "y" ]]; then
         echo "Removing existing virtualenv..."
         pyenv virtualenv-delete -f "${VENV_NAME}"

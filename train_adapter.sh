@@ -105,6 +105,7 @@ fi
 # Export
 echo ""
 echo "Exporting..."
+# shellcheck disable=SC2012  # ls -t selects the newest checkpoint by mtime; .pt names are controlled ASCII
 CHECKPOINT=$(ls -t "$CHECKPOINT_DIR"/*.pt 2>/dev/null | head -1)
 [ -n "$CHECKPOINT" ] || { echo "Error: No checkpoint found"; exit 1; }
 

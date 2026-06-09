@@ -79,10 +79,11 @@ if [ -n "$VERSION_OVERRIDE" ]; then
     ADAPTER_VERSION="$VERSION_OVERRIDE"
 else
     # Extract version from toolkit directory name (e.g., adapter_training_toolkit_v26_0_0)
+    # shellcheck disable=SC2012  # toolkit dir names are fixed-format ASCII; ls keeps the simple glob ordering
     TOOLKIT_DIR=$(ls -d adapter_training_toolkit_v* 2>/dev/null | head -1)
     if [ -n "$TOOLKIT_DIR" ]; then
         # Extract version part after 'v' (e.g., 26_0_0 from adapter_training_toolkit_v26_0_0)
-        ADAPTER_VERSION=$(echo "$TOOLKIT_DIR" | sed 's/.*_v//')
+        ADAPTER_VERSION=${TOOLKIT_DIR##*_v}
     else
         echo "Error: Could not find toolkit directory (adapter_training_toolkit_v*)"
         echo "Specify version manually with --version"
@@ -195,8 +196,9 @@ api_call() {
 
 check_response() {
     local response=$1 expected=$2 action=$3
-    local code=$(echo "$response" | tail -n1)
-    local body=$(echo "$response" | sed '$d')
+    local code body
+    code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
     if [[ ! "$expected" =~ $code ]]; then
         echo "Error: $action (HTTP $code)"
         echo "$body" | jq -r '.errors[0].detail // .errors[0].title // "Unknown error"' 2>/dev/null || echo "$body"

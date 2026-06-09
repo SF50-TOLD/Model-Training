@@ -23,8 +23,19 @@ LOW_CONFIDENCE_FILE = Path(__file__).parent / "data" / "low_confidence.jsonl"
 
 # Valid contamination types
 CONTAMINATION_TYPES = [
-    "water", "slush", "wetSnow", "drySnow", "ice", "compactedSnow",
-    "sand", "mud", "rubber", "oil", "fuel", "gravel", "vegetation"
+    "water",
+    "slush",
+    "wetSnow",
+    "drySnow",
+    "ice",
+    "compactedSnow",
+    "sand",
+    "mud",
+    "rubber",
+    "oil",
+    "fuel",
+    "gravel",
+    "vegetation",
 ]
 
 # All runway entry fields grouped by category
@@ -52,7 +63,10 @@ RUNWAY_FIELDS = {
     "obstacleDistanceUnits": {"type": "string", "hint": "ft, m, or nm"},
     "obstacleBearing": {"type": "number", "hint": "Bearing in degrees"},
     "obstacleCoordinates": {"type": "string", "hint": "GPS coords (e.g., 6449N14751W)"},
-    "obstacleReferencePoint": {"type": "string", "hint": "Reference (e.g., THR 27, ARP)"},
+    "obstacleReferencePoint": {
+        "type": "string",
+        "hint": "Reference (e.g., THR 27, ARP)",
+    },
     # Climb
     "requiredClimbGradient": {"type": "number", "hint": "Minimum climb gradient"},
     "requiredClimbGradientUnits": {"type": "string", "hint": "percent or ft/nm"},
@@ -65,7 +79,7 @@ RUNWAY_FIELDS = {
 def load_jsonl(filepath: Path) -> list[dict]:
     """Load items from JSONL file."""
     items = []
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -103,8 +117,16 @@ def display_runway_entry(entry: dict, entry_idx: int, total_entries: int):
     has_shortening = entry.get("takeoffShortening") or entry.get("landingShortening")
     if has_shortening:
         print("  Shortening:")
-        print_field("takeoffShortening", f"{entry.get('takeoffShortening')} {entry.get('takeoffShorteningUnits') or ''}", 4)
-        print_field("landingShortening", f"{entry.get('landingShortening')} {entry.get('landingShorteningUnits') or ''}", 4)
+        print_field(
+            "takeoffShortening",
+            f"{entry.get('takeoffShortening')} {entry.get('takeoffShorteningUnits') or ''}",
+            4,
+        )
+        print_field(
+            "landingShortening",
+            f"{entry.get('landingShortening')} {entry.get('landingShorteningUnits') or ''}",
+            4,
+        )
 
     # Declared distances
     has_declared = entry.get("TORA") or entry.get("TODA") or entry.get("LDA")
@@ -118,16 +140,32 @@ def display_runway_entry(entry: dict, entry_idx: int, total_entries: int):
             print_field("LDA", f"{entry.get('LDA')} {entry.get('LDAUnits') or ''}", 4)
 
     # Obstacles
-    has_obstacle = (entry.get("obstacleHeight") or entry.get("obstacleHeightMSL") or
-                    entry.get("obstacleDistance") or entry.get("obstacleCoordinates"))
+    has_obstacle = (
+        entry.get("obstacleHeight")
+        or entry.get("obstacleHeightMSL")
+        or entry.get("obstacleDistance")
+        or entry.get("obstacleCoordinates")
+    )
     if has_obstacle:
         print("  Obstacle:")
         if entry.get("obstacleHeight"):
-            print_field("height AGL", f"{entry.get('obstacleHeight')} {entry.get('obstacleHeightUnits') or ''}", 4)
+            print_field(
+                "height AGL",
+                f"{entry.get('obstacleHeight')} {entry.get('obstacleHeightUnits') or ''}",
+                4,
+            )
         if entry.get("obstacleHeightMSL"):
-            print_field("height MSL", f"{entry.get('obstacleHeightMSL')} {entry.get('obstacleHeightMSLUnits') or ''}", 4)
+            print_field(
+                "height MSL",
+                f"{entry.get('obstacleHeightMSL')} {entry.get('obstacleHeightMSLUnits') or ''}",
+                4,
+            )
         if entry.get("obstacleDistance"):
-            print_field("distance", f"{entry.get('obstacleDistance')} {entry.get('obstacleDistanceUnits') or ''}", 4)
+            print_field(
+                "distance",
+                f"{entry.get('obstacleDistance')} {entry.get('obstacleDistanceUnits') or ''}",
+                4,
+            )
         if entry.get("obstacleBearing"):
             print_field("bearing", f"{entry.get('obstacleBearing')}°", 4)
         if entry.get("obstacleCoordinates"):
@@ -142,12 +180,16 @@ def display_runway_entry(entry: dict, entry_idx: int, total_entries: int):
         for i, c in enumerate(contaminations):
             coverage = f" ({c.get('coverage')}%)" if c.get("coverage") else ""
             depth = f", {c.get('depth')} {c.get('depthUnits')}" if c.get("depth") else ""
-            print(f"    [{i+1}] {c.get('type')}{coverage}{depth}")
+            print(f"    [{i + 1}] {c.get('type')}{coverage}{depth}")
 
     # Climb gradient
     if entry.get("requiredClimbGradient"):
         print("  Climb:")
-        print_field("requiredClimbGradient", f"{entry.get('requiredClimbGradient')} {entry.get('requiredClimbGradientUnits') or ''}", 4)
+        print_field(
+            "requiredClimbGradient",
+            f"{entry.get('requiredClimbGradient')} {entry.get('requiredClimbGradientUnits') or ''}",
+            4,
+        )
 
     # Metadata
     print_field("confidence", entry.get("confidence"), 2)
@@ -229,7 +271,7 @@ def edit_contaminations(entry: dict) -> bool:
             for i, c in enumerate(contaminations):
                 coverage = f" ({c.get('coverage')}%)" if c.get("coverage") else ""
                 depth = f", {c.get('depth')} {c.get('depthUnits')}" if c.get("depth") else ""
-                print(f"  [{i+1}] {c.get('type')}{coverage}{depth}")
+                print(f"  [{i + 1}] {c.get('type')}{coverage}{depth}")
 
         print("\nCommands: [a] Add  [e] Edit  [d] Delete  [Enter] Done")
         cmd = input("Contamination command: ").strip().lower()
@@ -254,12 +296,14 @@ def edit_contaminations(entry: dict) -> bool:
             if depth is not None:
                 depth_units = input("Depth units (in/mm/cm): ").strip() or None
 
-            contaminations.append({
-                "type": ctype,
-                "coverage": coverage,
-                "depth": depth,
-                "depthUnits": depth_units,
-            })
+            contaminations.append(
+                {
+                    "type": ctype,
+                    "coverage": coverage,
+                    "depth": depth,
+                    "depthUnits": depth_units,
+                }
+            )
 
         elif cmd == "e":
             if not contaminations:
@@ -318,11 +362,33 @@ def edit_runway_entry(entry: dict) -> bool:
     # Group fields by category for display
     categories = [
         ("Runway", ["runway", "runwayClosed"]),
-        ("Shortening", ["takeoffShortening", "takeoffShorteningUnits", "landingShortening", "landingShorteningUnits"]),
-        ("Declared Distances", ["TORA", "TORAUnits", "TODA", "TODAUnits", "LDA", "LDAUnits"]),
-        ("Obstacle", ["obstacleHeight", "obstacleHeightUnits", "obstacleHeightMSL", "obstacleHeightMSLUnits",
-                      "obstacleDistance", "obstacleDistanceUnits", "obstacleBearing",
-                      "obstacleCoordinates", "obstacleReferencePoint"]),
+        (
+            "Shortening",
+            [
+                "takeoffShortening",
+                "takeoffShorteningUnits",
+                "landingShortening",
+                "landingShorteningUnits",
+            ],
+        ),
+        (
+            "Declared Distances",
+            ["TORA", "TORAUnits", "TODA", "TODAUnits", "LDA", "LDAUnits"],
+        ),
+        (
+            "Obstacle",
+            [
+                "obstacleHeight",
+                "obstacleHeightUnits",
+                "obstacleHeightMSL",
+                "obstacleHeightMSLUnits",
+                "obstacleDistance",
+                "obstacleDistanceUnits",
+                "obstacleBearing",
+                "obstacleCoordinates",
+                "obstacleReferencePoint",
+            ],
+        ),
         ("Climb", ["requiredClimbGradient", "requiredClimbGradientUnits"]),
         ("Metadata", ["confidence", "notes"]),
     ]
@@ -426,10 +492,7 @@ def update_min_confidence(item: dict):
     """Recalculate min_confidence from runway entries."""
     runway_entries = item.get("runway_entries", [])
     if runway_entries:
-        item["min_confidence"] = min(
-            (entry.get("confidence", 1.0) for entry in runway_entries),
-            default=1.0
-        )
+        item["min_confidence"] = min((entry.get("confidence", 1.0) for entry in runway_entries), default=1.0)
     else:
         item["min_confidence"] = 1.0
 
@@ -447,7 +510,9 @@ def review_item(item: dict, index: int, total: int) -> tuple[str, bool]:
     item_modified = False
 
     def print_commands():
-        print("\nCommands: [Enter] Next  [p] Prev  [g] Go to #  [e] Edit entry  [a] Add entry  [d] Delete entry  [s] Save+quit  [q] Quit")
+        print(
+            "\nCommands: [Enter] Next  [p] Prev  [g] Go to #  [e] Edit entry  [a] Add entry  [d] Delete entry  [s] Save+quit  [q] Quit"  # noqa: E501
+        )
 
     print_commands()
 

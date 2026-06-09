@@ -30,13 +30,16 @@ def is_canceled_notam(notam_text: str) -> bool:
     """Check if NOTAM text indicates a cancellation."""
     text_upper = notam_text.upper()
     # Common cancellation indicators
-    return any(indicator in text_upper for indicator in [
-        "CANCEL",
-        "NOTAMC",  # NOTAM Cancel
-        "CNL",     # Cancel abbreviation
-        "CNCL",    # Cancel abbreviation
-        "WITHDRAWN",
-    ])
+    return any(
+        indicator in text_upper
+        for indicator in [
+            "CANCEL",
+            "NOTAMC",  # NOTAM Cancel
+            "CNL",  # Cancel abbreviation
+            "CNCL",  # Cancel abbreviation
+            "WITHDRAWN",
+        ]
+    )
 
 
 def format_as_training_example(item: dict) -> list[dict] | None:
@@ -140,7 +143,7 @@ def load_silver_dataset() -> list[dict]:
     """Load the silver dataset from JSONL file."""
     items = []
 
-    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+    with open(INPUT_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -152,9 +155,7 @@ def load_silver_dataset() -> list[dict]:
     return items
 
 
-def split_dataset(
-    examples: list, train_ratio: float, valid_ratio: float, test_ratio: float
-) -> tuple[list, list, list]:
+def split_dataset(examples: list, train_ratio: float, valid_ratio: float, test_ratio: float) -> tuple[list, list, list]:
     """Split dataset into train/valid/test sets."""
     random.seed(RANDOM_SEED)
     random.shuffle(examples)
@@ -212,16 +213,14 @@ def main():
 
     # Split dataset
     print(f"\nSplitting dataset ({TRAIN_RATIO:.0%}/{VALID_RATIO:.0%}/{TEST_RATIO:.0%})...")
-    train, valid, test = split_dataset(
-        all_examples, TRAIN_RATIO, VALID_RATIO, TEST_RATIO
-    )
+    train, valid, test = split_dataset(all_examples, TRAIN_RATIO, VALID_RATIO, TEST_RATIO)
 
     print(f"  Train: {len(train)} examples")
     print(f"  Valid: {len(valid)} examples")
     print(f"  Test: {len(test)} examples")
 
     # Save files
-    print(f"\nSaving training files...")
+    print("\nSaving training files...")
     save_jsonl(train, TRAIN_FILE)
     print(f"  {TRAIN_FILE}")
 

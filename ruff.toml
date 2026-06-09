@@ -1,0 +1,11 @@
+target-version = "py314"
+line-length = 120
+
+[lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[lint.per-file-ignores]
+# Multi-line Claude prompt templates and JSON examples whose lines must stay
+# intact; wrapping would alter the text sent to the model.
+"generate_silver_labels.py" = ["E501"]
+"test_labeler.py" = ["E501"]

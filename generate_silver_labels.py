@@ -144,10 +144,7 @@ async def extract_notam_data(notam: dict, semaphore: asyncio.Semaphore) -> dict 
                 extraction = [extraction]
 
             # Calculate minimum confidence across all runway entries
-            min_confidence = min(
-                (entry.get("confidence", 1.0) for entry in extraction),
-                default=1.0
-            )
+            min_confidence = min((entry.get("confidence", 1.0) for entry in extraction), default=1.0)
 
             return {
                 "notam_id": notam.get("notam_id"),
@@ -197,7 +194,7 @@ async def main_async():
         return
 
     print(f"Loading NOTAMs from {INPUT_FILE}...")
-    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+    with open(INPUT_FILE, encoding="utf-8") as f:
         notams = json.load(f)
 
     print(f"Loaded {len(notams)} NOTAMs to process")
@@ -206,8 +203,8 @@ async def main_async():
     # Check for existing partial results
     existing_ids = set()
     if OUTPUT_FILE.exists():
-        print(f"Found existing output file, loading processed IDs...")
-        with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+        print("Found existing output file, loading processed IDs...")
+        with open(OUTPUT_FILE, encoding="utf-8") as f:
             for line in f:
                 try:
                     item = json.loads(line)
@@ -230,7 +227,7 @@ async def main_async():
 
     # Load all results (including previously processed)
     all_results = []
-    with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+    with open(OUTPUT_FILE, encoding="utf-8") as f:
         for line in f:
             try:
                 all_results.append(json.loads(line))
@@ -256,27 +253,18 @@ async def main_async():
     # Count extraction types across all runway entries
     total_runway_entries = sum(len(r.get("runway_entries", [])) for r in all_results)
     contamination_count = sum(
-        1 for r in all_results
-        for entry in r.get("runway_entries", [])
-        if entry.get("contaminations")
+        1 for r in all_results for entry in r.get("runway_entries", []) if entry.get("contaminations")
     )
     shortening_count = sum(
-        1 for r in all_results
+        1
+        for r in all_results
         for entry in r.get("runway_entries", [])
         if entry.get("takeoffShortening") or entry.get("landingShortening")
     )
-    obstacle_count = sum(
-        1 for r in all_results
-        for entry in r.get("runway_entries", [])
-        if entry.get("obstacleHeight")
-    )
-    closure_count = sum(
-        1 for r in all_results
-        for entry in r.get("runway_entries", [])
-        if entry.get("runwayClosed")
-    )
+    obstacle_count = sum(1 for r in all_results for entry in r.get("runway_entries", []) if entry.get("obstacleHeight"))
+    closure_count = sum(1 for r in all_results for entry in r.get("runway_entries", []) if entry.get("runwayClosed"))
 
-    print(f"\nExtraction breakdown:")
+    print("\nExtraction breakdown:")
     print(f"  Total runway entries: {total_runway_entries}")
     print(f"  Contamination: {contamination_count}")
     print(f"  Distance shortening: {shortening_count}")

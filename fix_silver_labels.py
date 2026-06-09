@@ -42,7 +42,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
     # Pattern for DDMMSS.s format (e.g., "243433.9N0814228.8W" or "010641N1040624E")
     match = re.match(
         r"(\d{2})(\d{2})(\d{2}(?:\.\d+)?)([NS])\s*(\d{2,3})(\d{2})(\d{2}(?:\.\d+)?)([EW])",
-        clean
+        clean,
     )
     if match:
         lat_deg = int(match.group(1))
@@ -65,10 +65,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
         return f"{lat:.6f}, {lon:.6f}"
 
     # Pattern for DDMM format (e.g., "6449N14751W", "5022N00330E")
-    match = re.match(
-        r"(\d{2})(\d{2})([NS])\s*(\d{2,3})(\d{2})([EW])",
-        clean
-    )
+    match = re.match(r"(\d{2})(\d{2})([NS])\s*(\d{2,3})(\d{2})([EW])", clean)
     if match:
         lat_deg = int(match.group(1))
         lat_min = int(match.group(2))
@@ -88,10 +85,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
         return f"{lat:.4f}, {lon:.4f}"
 
     # Pattern for degrees/minutes with symbols (e.g., "64°49'N 147°51'W")
-    match = re.match(
-        r"(\d+)[°](\d+)['\s]*([NS])\s*(\d+)[°](\d+)['\s]*([EW])",
-        coord_str.upper()
-    )
+    match = re.match(r"(\d+)[°](\d+)['\s]*([NS])\s*(\d+)[°](\d+)['\s]*([EW])", coord_str.upper())
     if match:
         lat_deg = int(match.group(1))
         lat_min = int(match.group(2))
@@ -113,7 +107,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
     # Pattern for "N24 34 33.9/W81 42 28.8" format (direction prefix with spaces)
     match = re.match(
         r"([NS])(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s*/\s*([EW])(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)",
-        coord_str.upper()
+        coord_str.upper(),
     )
     if match:
         lat_dir = match.group(1)
@@ -138,7 +132,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
     # Pattern for DMS with symbols: "37°5'7.3"N, 127°2'26.1"E" or "35°44'50.6"N 139°20'37.6"E"
     match = re.match(
         r"(\d+)°(\d+)'(\d+(?:\.\d+)?)[\"″]?\s*([NS])[,\s]+(\d+)°(\d+)'(\d+(?:\.\d+)?)[\"″]?\s*([EW])",
-        coord_str
+        coord_str,
     )
     if match:
         lat_deg = int(match.group(1))
@@ -163,7 +157,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
     # Pattern for "N521603.9 E1042055.1" (direction prefix, compact DDMMSS.s)
     match = re.match(
         r"([NS])(\d{2})(\d{2})(\d{2}(?:\.\d+)?)\s+([EW])(\d{2,3})(\d{2})(\d{2}(?:\.\d+)?)",
-        coord_str.upper()
+        coord_str.upper(),
     )
     if match:
         lat_dir = match.group(1)
@@ -190,7 +184,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
     normalized = clean.replace(",", ".")
     match = re.match(
         r"(\d{2})(\d{2})(\d{2}(?:\.\d+)?)([NS])\s*(\d{2,3})(\d{2})(\d{2}(?:\.\d+)?)([EW])",
-        normalized
+        normalized,
     )
     if match:
         lat_deg = int(match.group(1))
@@ -213,10 +207,7 @@ def parse_single_coordinate(coord_str: str) -> str | None:
         return f"{lat:.6f}, {lon:.6f}"
 
     # Pattern for 7-digit lat / 8-digit lon: "4500511S1684416E" (DDMMSS.sSDDDMMSS.sE)
-    match = re.match(
-        r"(\d{2})(\d{2})(\d{3})([NS])(\d{3})(\d{2})(\d{2,3})([EW])",
-        clean
-    )
+    match = re.match(r"(\d{2})(\d{2})(\d{3})([NS])(\d{3})(\d{2})(\d{2,3})([EW])", clean)
     if match:
         lat_deg = int(match.group(1))
         lat_min = int(match.group(2))
@@ -363,7 +354,7 @@ def main():
     # Load items
     print(f"Loading {SILVER_FILE}...")
     items = []
-    with open(SILVER_FILE, "r", encoding="utf-8") as f:
+    with open(SILVER_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -392,7 +383,7 @@ def main():
                 if isinstance(bearing, str) and not bearing.replace(".", "").replace("-", "").isdigit():
                     bearings_to_fix += 1
 
-    print(f"\nIssues found:")
+    print("\nIssues found:")
     print(f"  'ALL' runways: {all_runways}")
     print(f"  Coordinates to convert: {coords_to_fix}")
     print(f"  Bearings to convert: {bearings_to_fix}")
@@ -435,7 +426,7 @@ def main():
                 if isinstance(bearing, (int, float)):
                     bearings_fixed += 1
 
-    print(f"\nAfter fixing:")
+    print("\nAfter fixing:")
     print(f"  'ALL' runways remaining: {all_runways_after}")
     print(f"  Coordinates in decimal format: {coords_fixed}")
     print(f"  Bearings as numbers: {bearings_fixed}")
