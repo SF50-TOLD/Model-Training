@@ -31,3 +31,4 @@ exports/
 
 # Logs
 *.log
+.claude/settings.local.json
