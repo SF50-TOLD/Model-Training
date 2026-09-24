@@ -37,9 +37,11 @@ function emptyExtraction() {
 function evidenceSegments(text, evidence) {
   const spans = [];
   for (const { path, quote } of evidence) {
-    if (!quote) continue;
-    for (let at = text.indexOf(quote); at !== -1; at = text.indexOf(quote, at + 1)) {
-      spans.push({ start: at, end: at + quote.length, path });
+    const words = quote.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) continue;
+    const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    for (const match of text.matchAll(new RegExp(escaped.join("\\s+"), "g"))) {
+      spans.push({ start: match.index, end: match.index + match[0].length, path });
     }
   }
   const cuts = [...new Set([0, text.length, ...spans.flatMap((s) => [s.start, s.end])])].sort((a, b) => a - b);

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from notam_gold import db
 from notam_gold.coords import parse_position
+from notam_gold.labeling import evidence_problems
 from notam_gold.prompt import build_prompt
 from notam_gold.schema import canonicalize, schema, validate
 from notam_gold.strata import ALL_STRATA
@@ -30,10 +31,18 @@ class ReviewRequest(BaseModel):
     note: str | None = None
 
 
+def _current_problems(extraction: dict | None, evidence: list[dict], text: str, stored: list[dict]) -> list[dict]:
+    """Problems under today's validation and evidence matching; the stored ones reflect ingest time."""
+    if extraction is None:
+        return stored
+    return [p.to_dict() for p in validate(extraction)] + evidence_problems(evidence, text)
+
+
 def _silver(connection: sqlite3.Connection, key: str, run_name: str) -> dict | None:
     row = connection.execute(
-        "SELECT silver_label.*, label_run.model, label_run.prompt_version FROM silver_label"
-        " JOIN label_run ON label_run.id = run_id WHERE notam_key = ? AND label_run.name = ?"
+        "SELECT silver_label.*, label_run.model, label_run.prompt_version, notam.notam_text FROM silver_label"
+        " JOIN label_run ON label_run.id = run_id JOIN notam ON notam.id = notam_key"
+        " WHERE notam_key = ? AND label_run.name = ?"
         " ORDER BY silver_label.id DESC LIMIT 1",
         (key, run_name),
     ).fetchone()
@@ -46,7 +55,9 @@ def _silver(connection: sqlite3.Connection, key: str, run_name: str) -> dict | N
         "extraction": db.loads(row["extraction"]),
         "evidence": db.loads(row["evidence"]),
         "note": row["note"],
-        "problems": db.loads(row["problems"]),
+        "problems": _current_problems(
+            db.loads(row["extraction"]), db.loads(row["evidence"]), row["notam_text"], db.loads(row["problems"])
+        ),
     }
 
 

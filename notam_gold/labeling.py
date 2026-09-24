@@ -199,11 +199,16 @@ def submit(
     return cursor.lastrowid
 
 
+def _squashed(text: str) -> str:
+    return " ".join(text.split())
+
+
 def evidence_problems(evidence: list[dict], text: str) -> list[dict]:
+    """Quotes absent from the text, ignoring whitespace differences such as CRLF versus LF line breaks."""
     return [
         {"path": e["path"], "message": f"Evidence quote not found in text: {e['quote']!r}"}
         for e in evidence
-        if e["quote"] not in text
+        if _squashed(e["quote"]) not in _squashed(text)
     ]
 
 
