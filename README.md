@@ -1,180 +1,134 @@
-# NOTAM Adapter Training
+# NOTAM Gold Evaluation Set
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](.python-version)
+[![Python](https://img.shields.io/badge/python-3.14-blue.svg)](setup.sh)
 
-Train a Foundation Models LoRA adapter to extract structured runway performance data from raw NOTAM text.
+This repo builds a human-reviewed gold set of NOTAM extractions. The set measures how accurately the SF50 TOLD app's on-device model reads runway-performance data from raw NOTAM text.
 
-## Quick Start
-
-```bash
-# 1. Setup environment
-./setup.sh
-
-# 2. Prepare training data
-./prepare_data.sh
-
-# 3. Train the adapter
-./train_adapter.sh
-
-# 4. Upload to App Store Connect
-./upload_adapter.sh
-```
-
-## Overview
-
-This pipeline trains a custom LoRA adapter for Apple's Foundation Models framework to parse NOTAMs and extract runway performance data.
+On iOS 27, the app uses Apple's stock Foundation Models model. The model *proposes* runway effects from a NOTAM, and the pilot confirms them. Before that ships, the app's Evaluations harness scores the model against the labels in [`eval/`](eval/). Every label there has been reviewed by a person.
 
 ```text
-[NOTAM API] → [Filter] → [Label with Claude] → [Train] → [Export] → [Upload]
+[NOTAM API] → corpus → strata → gold candidates → silver labels (2 runs) → human review → eval/
 ```
 
-## Prerequisites
+## The contract
 
-- macOS with Apple Silicon (32GB+ RAM recommended)
-- Python 3.11 (via pyenv)
-- [Apple's adapter training toolkit](https://developer.apple.com/apple-intelligence/foundation-models-adapter/)
-- Anthropic API key (for labeling)
-- Apple Developer Program membership (for hosting)
+[`schema/notam_extraction.schema.json`](schema/notam_extraction.schema.json) is the extraction schema, and [`schema/SCHEMA.md`](schema/SCHEMA.md) gives the rule for every field, with worked examples. The app mirrors the schema as a `@Generable` Swift struct. Any change to it is a cross-repo change.
+
+The core rule: **a label records only what the NOTAM text states**. An absent fact is `null`, and the evaluation scores that `null`. Units and designators are recorded as written. The app does all derivation (shortening, per-direction effects, contamination categories) itself.
 
 ## Setup
 
-### 1. Install Apple's Toolkit
+```bash
+./setup.sh                # pyenv virtualenv "notam-gold" + dependencies
+cp .env.example .env      # then fill in ANTHROPIC_API_KEY and NOTAM_API_TOKEN
+```
 
-Download from [Apple Developer](https://developer.apple.com/apple-intelligence/foundation-models-adapter/):
+## Pipeline
+
+### 1. Corpus
 
 ```bash
-unzip adapter_training_toolkit_v26_0_0.zip
+./download_notams.py
 ```
 
-### 2. Setup Python Environment
+Downloads every NOTAM from the NOTAM API into `data/notams_<date>.jsonl.gz`. It pages by keyset on `effective_start`, because deep offsets time out on the server. It then merges the download with the legacy snapshot `data/all_notams.json` into `data/corpus.jsonl.gz`.
+
+`notam_id` alone isn't unique, because series numbers repeat between countries. NOTAMs are therefore identified by location plus `notam_id`, and deduplicated on that and then on their content. To re-merge without downloading again, pass `--skip-download`.
+
+### 2. Strata and gold candidates
 
 ```bash
-./setup.sh
+./select_gold.py [--seed 2026]
 ```
 
-### 3. Configure Environment
+A regex pass tags each NOTAM with strata:
+
+- declared distances
+- displaced threshold
+- partial closure
+- full closure
+- condition report with or without RwyCC
+- obstacle
+- cancelled
+- plausible negative
+- other negative
+
+A seeded, reproducible selection then writes about 550 candidates to `data/notam_gold.sqlite`:
+
+- every displaced-threshold and declared-distance NOTAM, up to 150;
+- stratified samples of the rest;
+- at least 25% negatives, mostly plausible ones.
+
+Reissued NOTAMs are collapsed to one each, and each stratum is spread across airports.
+
+### 3. Silver labels
 
 ```bash
-cp .env.example .env
-# Edit .env with your credentials
+./label_silver.py estimate A          # projected cost
+./label_silver.py submit A --pilot 20
+./label_silver.py submit A --confirm-cost
+./label_silver.py status
+./label_silver.py ingest <run id>
+./label_silver.py disagreements       # after both runs
+./label_silver.py cost
 ```
 
-Required variables:
+Two independent runs label every candidate through the Message Batches API, with structured outputs constrained to the schema:
 
-- `ANTHROPIC_API_KEY` - For Claude-based labeling
-- `TOOLKIT_PATH` - Path to Apple's toolkit
-- `ASC_ISSUER_ID`, `ASC_KEY_ID`, `ASC_PRIVATE_KEY_PATH` - App Store Connect API credentials
-- `APP_APPLE_ID` - Your app's Apple ID (numeric)
+- run A uses Claude Opus 5.5;
+- run B uses Claude Opus 5, with the prompt's examples shuffled.
 
-## Data Preparation
+The cached system prompt is [`labeler/system_prompt.md`](labeler/system_prompt.md), then `SCHEMA.md`, then [`labeler/examples.jsonl`](labeler/examples.jsonl). Each label comes with the exact text it relied on (its evidence) and a note on anything ambiguous.
+
+Every label records its model, prompt version, schema version and timestamp. Silver labels are never modified: database triggers reject updates and deletes. The disagreements between the two runs set the review order.
+
+### 4. Review
 
 ```bash
-./prepare_data.sh
+./review.py              # http://127.0.0.1:8765
 ```
 
-Or run individual steps:
+The review app shows one NOTAM per screen:
 
-1. `python download_all_notams.py` - Download NOTAMs from API
-2. `python filter_relevant_notams.py` - Filter runway-relevant NOTAMs
-3. `python generate_silver_labels.py` - Label with Claude
-4. `python review_tool.py --low-confidence` - Review low-confidence labels
-5. `python fix_silver_labels.py` - Apply automatic fixes
-6. `python format_training_data.py` - Format for training
+- **Left:** the NOTAM text, with each label's evidence highlighted. Focusing a field lights up its span.
+- **Right:** the full schema as a form, prefilled from run A.
+- **Disagreements:** fields where run B disagreed are shown in amber, with run B's value alongside.
 
-## Training
+| Key | Action |
+|---|---|
+| `A` | Accept |
+| `S` / ⌘↵ | Save edits |
+| `M` | Mark ambiguous (kept, but excluded from the gold set) |
+| `K` | Skip |
+| `N` | Note |
+| `J` / `P` | Next / previous |
+| `?` | Help |
+
+The queue opens on unreviewed NOTAMs, most disagreement first. You can filter it by stratum, by disagreement, and by status.
+
+Reviews are stored separately from silver labels and are append-only. Each review records:
+
+- the reviewer, from `git config user.name` or `--reviewer`;
+- the time;
+- the silver label it started from;
+- whether it was edited.
+
+`review.py` backs up the database on start.
+
+### 5. Export
 
 ```bash
-./train_adapter.sh
+./export_gold.py
 ```
 
-Options:
+Writes the accepted and edited reviews to [`eval/`](eval/) in the Evaluations framework's `ModelSample` shape. The export includes a stable dev/test split; see [`eval/README.md`](eval/README.md).
 
-- `--export-only` - Export existing checkpoint without training
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TOOLKIT_PATH` | required | Apple toolkit location |
-| `EPOCHS` | 5 | Training epochs |
-| `BATCH_SIZE` | 4 | Batch size (reduce if OOM) |
-| `LEARNING_RATE` | 1e-3 | Learning rate |
-
-For memory issues:
+## Tests
 
 ```bash
-BATCH_SIZE=1 ./train_adapter.sh
+ruff check . && ruff format --check . && pytest
 ```
-
-## Upload
-
-```bash
-./upload_adapter.sh
-```
-
-Options:
-
-- `--dry-run` - Validate without uploading
-
-The script uses the App Store Connect API to:
-
-1. Create/find an asset pack
-2. Create a new version
-3. Upload the adapter
-4. Commit and verify processing
-
-### Required Entitlement
-
-Request the **Foundation Models Framework Adapter Entitlement** from Apple before shipping:
-
-1. Go to [Apple Developer Account](https://developer.apple.com/account)
-2. Certificates, Identifiers & Profiles → Identifiers
-3. Select your App ID → Request entitlement
-
-## Directory Structure
-
-```text
-├── setup.sh               # Environment setup
-├── prepare_data.sh        # Data preparation pipeline
-├── train_adapter.sh       # Training script
-├── upload_adapter.sh      # Upload to App Store Connect
-├── requirements.txt       # Python dependencies
-├── .env.example           # Environment template
-├── data/                  # Training data (gitignored)
-├── checkpoints/           # Model checkpoints (gitignored)
-└── exports/               # Exported adapters (gitignored)
-```
-
-## Data Schema
-
-### Training Format
-
-```json
-[
-  {"role": "user", "content": "Extract runway data from this NOTAM...\n\nRWY 28L THR DSPLCD 500FT"},
-  {"role": "assistant", "content": "{\"airportID\":\"KSFO\",\"runway\":\"28L\",\"takeoffShortening\":500,...}"}
-]
-```
-
-### Extraction Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `airportID` | string | ICAO airport code |
-| `runway` | string? | Runway designator |
-| `runwayClosed` | bool | Runway fully closed |
-| `takeoffShortening` | number? | Takeoff distance reduction |
-| `landingShortening` | number? | Landing distance reduction |
-| `TORA`, `TODA`, `LDA` | number? | Declared distances |
-| `obstacleHeight` | number? | Obstacle height AGL |
-| `contaminations` | array | Surface contaminations |
-
-## References
-
-- [Foundation Models adapter training](https://developer.apple.com/apple-intelligence/foundation-models-adapter/)
-- [Background Assets framework](https://developer.apple.com/documentation/backgroundassets)
-- [App Store Connect API](https://developer.apple.com/documentation/appstoreconnectapi)
 
 ## License
 
