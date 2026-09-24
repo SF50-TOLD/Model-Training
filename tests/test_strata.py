@@ -1,0 +1,60 @@
+import pytest
+
+from notam_gold import strata as s
+
+NEAR_MISS = s.PLAUSIBLE_NEGATIVE
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("SFO RWY 28L DECLARED DIST: TORA 10810FT TODA 10810FT ASDA 10981FT\nLDA 10275FT.", [s.DECLARED_DISTANCES]),
+        ("THR RWY 34 DISPLACED 320M. RWY 16/34 EFFECTIVE OPR LENGTH 1420M.", [s.DISPLACED_THRESHOLD]),
+        ("RWY 07 DTHR 210M DUE PAVEMENT RESURFACING WIP.", [s.DISPLACED_THRESHOLD]),
+        ("THR 32 NO LONGER DISPLACED. DECLARED DIST AS PUBLISHED.", [s.DECLARED_DISTANCES]),
+        ("THR 06 IS DISPLACED BY 3010FT FOR CIVILIAN ACFT.", [s.DISPLACED_THRESHOLD]),
+        ("DTW RWY 09R/27L W 1713FT CLSD.", [s.PARTIAL_CLOSURE]),
+        ("RWY 24L/6R CLOSED FIRST 1,500 FT FOR CONCRETE DEMO.", [s.PARTIAL_CLOSURE]),
+        ("RWY 08L/26R CLSD BTN TWY TANGO AND TWY ROMEO DUE TO WIP", [s.PARTIAL_CLOSURE]),
+        ("TYS RWY 05R/23L CLSD", [s.FULL_CLOSURE]),
+        ("DTW RWY 04L/22R CLSD TO ACFT WINGSPAN MORE THAN 118FT", [s.PLAUSIBLE_NEGATIVE]),
+        ("JNU RWY 08 FICON 5/5/5 100 PCT WET DEICED LIQUID OBS AT 2511262007.", [s.FICON_RWYCC]),
+        ("SLK RWY 23 FICON 10 PCT ICE 140FT WID OBS AT 2511272051.", [s.FICON_NO_RWYCC]),
+        ("HOM TWY B NORTH OF RWY 4/22 FICON PATCHY ICE SANDED OBS AT", [s.PLAUSIBLE_NEGATIVE]),
+        ("JFK OBST CRANE (ASN 2024-AEA-1604-NRA) 403906N0734931W (2.2NM WNW\nJFK) 114FT (100FT AGL)", [s.OBSTACLE]),
+        ("OBST LGT ON POWER LINE TOWER U/S", [s.PLAUSIBLE_NEGATIVE]),
+        (
+            "OBST TOWER LGT (ASR 1287004) 312129.30N0885838.20W (3.3NM NW M59) 485.9FT (258.9FT AGL) U/S",
+            [s.PLAUSIBLE_NEGATIVE],
+        ),
+        ("MOBILE CRANE APRX 1570FT BEYOND DTHR 16 AND 1160FT EAST RCL. 120FT AGL 1402FT AMSL.", [s.OBSTACLE]),
+        ("A3388/25 NOTAMC A3387/25\nE) TPA RWY 01L/19R CLSD\nCANCELED", [s.FULL_CLOSURE, s.CANCELLED]),
+        ("ACV RWY 14 PAPI U/S", [s.PLAUSIBLE_NEGATIVE]),
+        ("R-AREA LSR6 AXALP ACT.", [s.OTHER_NEGATIVE]),
+    ],
+)
+def test_strata(text, expected):
+    assert s.strata(text) == expected
+
+
+def test_metadata_cancellation_is_a_stratum():
+    assert s.strata("TYS RWY 05R/23L CLSD", nms_type="C") == [s.FULL_CLOSURE, s.CANCELLED]
+
+
+def test_template_key_groups_reissues():
+    first = s.template_key("PAJN", "JNU RWY 08 FICON 5/5/5 100 PCT WET OBS AT 2511262007.")
+    reissue = s.template_key("PAJN", "JNU RWY 08 FICON 5/5/5 100 PCT WET OBS AT\n2511270130.")
+    changed = s.template_key("PAJN", "JNU RWY 08 FICON 3/3/3 100 PCT WET OBS AT 2511270130.")
+    assert first == reissue
+    assert first != changed
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SWBG0221 BGQQ 09241032\r (SNOWTAM 0221\r BGQQ\r 09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW",
+        "RSC 16 3/2/5 50 PCT 1/8IN WET SNOW, 70 PCT 1/8IN WET SNOW, 40 PCT \n1/8IN WET SNOW.",
+    ],
+)
+def test_grf_and_rsc_reports_have_codes(text):
+    assert s.strata(text) == [s.FICON_RWYCC]
