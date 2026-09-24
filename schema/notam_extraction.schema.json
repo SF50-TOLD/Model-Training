@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RISCfuture/SF50-TOLD/schema/notam_extraction.schema.json",
+  "schemaVersion": "1.0.0",
+  "title": "NOTAMExtraction",
+  "description": "Runway-performance facts stated in one NOTAM. Records only what the text states; absent facts are null. See SCHEMA.md for the rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["isCanceled", "effects"],
+  "properties": {
+    "isCanceled": {
+      "type": "boolean",
+      "description": "True only when the NOTAM text itself says it is a cancellation (NOTAMC, CANCELED, CNL). When true, effects is empty."
+    },
+    "effects": {
+      "type": "array",
+      "description": "One entry per runway designator (as written) whose performance-relevant facts the NOTAM states. Empty when nothing affects runway performance.",
+      "items": { "$ref": "#/$defs/RunwayEffect" }
+    }
+  },
+  "$defs": {
+    "RunwayEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runway",
+        "closure",
+        "closedLength",
+        "closedEnd",
+        "thresholdDisplacement",
+        "declaredDistances",
+        "surfaceCondition",
+        "obstacle"
+      ],
+      "properties": {
+        "runway": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{2}[LCR]?(/\\d{2}[LCR]?)?$",
+          "description": "Runway designator as written, zero-padded (\"09R\", \"09R/27L\"). Null when the effect applies to the aerodrome or all runways."
+        },
+        "closure": {
+          "type": "string",
+          "enum": ["none", "full", "partial"],
+          "description": "Closure this effect states for this designator."
+        },
+        "closedLength": {
+          "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }],
+          "description": "Length of a partial closure, when stated."
+        },
+        "closedEnd": {
+          "type": ["string", "null"],
+          "description": "Which end a partial closure is at, as stated: a compass direction (\"W\", \"NE\") or a runway end (\"27L\")."
+        },
+        "thresholdDisplacement": {
+          "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }],
+          "description": "Displacement of this runway's threshold, as stated."
+        },
+        "declaredDistances": {
+          "anyOf": [{ "$ref": "#/$defs/DeclaredDistances" }, { "type": "null" }],
+          "description": "Declared distances as stated; runway must be a single direction."
+        },
+        "surfaceCondition": {
+          "anyOf": [{ "$ref": "#/$defs/SurfaceCondition" }, { "type": "null" }],
+          "description": "Runway condition report (FICON / RCR)."
+        },
+        "obstacle": {
+          "anyOf": [{ "$ref": "#/$defs/Obstacle" }, { "type": "null" }],
+          "description": "An obstacle in the runway environment."
+        }
+      }
+    },
+    "Length": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "type": "string", "enum": ["ft", "m"] }
+      }
+    },
+    "DeclaredDistances": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["TORA", "TODA", "ASDA", "LDA"],
+      "properties": {
+        "TORA": { "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }] },
+        "TODA": { "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }] },
+        "ASDA": { "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }] },
+        "LDA": { "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }] }
+      }
+    },
+    "SurfaceCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rwyCC", "contaminants"],
+      "properties": {
+        "rwyCC": {
+          "type": ["array", "null"],
+          "description": "Runway condition codes as reported, one per third in reporting order (\"5/5/3\" → [5, 5, 3]).",
+          "items": { "type": "integer", "minimum": 0, "maximum": 6 }
+        },
+        "contaminants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Contaminant" }
+        }
+      }
+    },
+    "Contaminant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "runwayThird", "coveragePercent", "depth"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "wet",
+            "water",
+            "slush",
+            "wetSnow",
+            "drySnow",
+            "compactedSnow",
+            "frost",
+            "ice",
+            "wetIce",
+            "slushOverIce",
+            "waterOverCompactedSnow",
+            "drySnowOverCompactedSnow",
+            "wetSnowOverCompactedSnow",
+            "drySnowOverIce",
+            "wetSnowOverIce",
+            "other"
+          ]
+        },
+        "runwayThird": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 3,
+          "description": "Which third (1–3, in reporting order) this contaminant was reported for; null when reported for the whole runway."
+        },
+        "coveragePercent": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "depth": {
+          "anyOf": [{ "$ref": "#/$defs/Depth" }, { "type": "null" }]
+        }
+      }
+    },
+    "Depth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "type": "string", "enum": ["in", "mm"] }
+      }
+    },
+    "Distance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "type": "string", "enum": ["ft", "m", "nm"] }
+      }
+    },
+    "Obstacle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heightAGL",
+        "heightMSL",
+        "distance",
+        "distanceReference",
+        "bearingDegrees",
+        "latitude",
+        "longitude"
+      ],
+      "properties": {
+        "heightAGL": { "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }] },
+        "heightMSL": { "anyOf": [{ "$ref": "#/$defs/Length" }, { "type": "null" }] },
+        "distance": { "anyOf": [{ "$ref": "#/$defs/Distance" }, { "type": "null" }] },
+        "distanceReference": {
+          "type": ["string", "null"],
+          "description": "What the distance is measured from, as stated (\"RWY 27 THR\", \"ARP\", \"JFK\")."
+        },
+        "bearingDegrees": {
+          "type": ["number", "null"],
+          "description": "Bearing from the reference, in degrees, when stated numerically."
+        },
+        "latitude": {
+          "type": ["number", "null"],
+          "minimum": -90,
+          "maximum": 90,
+          "description": "Decimal degrees, parsed from the stated DMS position; north positive."
+        },
+        "longitude": {
+          "type": ["number", "null"],
+          "minimum": -180,
+          "maximum": 180,
+          "description": "Decimal degrees, parsed from the stated DMS position; east positive."
+        }
+      }
+    }
+  }
+}
