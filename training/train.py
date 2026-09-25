@@ -6,7 +6,11 @@ head runs only at the positions it's scored on — with a 152k-token vocabulary,
 prompt position would dwarf the rest of the step. The checkpoint with the lowest validation loss is
 saved as a Hugging Face–layout folder (safetensors, config, tokenizer) for conversion/.
 
+Every weight trains by default. ``--lora-rank`` trains low-rank adapters on every linear layer instead,
+for a base too large to fine-tune whole in the Mac's memory, and saves them fused into the weights.
+
     python -m training.train --out data/models/qwen3-0.6b-notam
+    python -m training.train --base Qwen/Qwen3-4B --lora-rank 32 --learning-rate 2e-4 --out data/models/qwen3-4b-notam
 """
 
 import argparse
@@ -23,6 +27,8 @@ from huggingface_hub import snapshot_download
 from mlx import nn
 from mlx.utils import tree_flatten
 from mlx_lm import load
+from mlx_lm.tuner.lora import LoRALinear
+from mlx_lm.tuner.utils import linear_to_lora_layers
 
 from training import reading_format
 from training.paths import DATASET_DIR
@@ -82,9 +88,26 @@ def validation_loss(model, data, tokens_per_batch: int) -> float:
     return sum(losses) / max(len(losses), 1)
 
 
+def add_adapters(model, rank: int, scale: float):
+    """Freeze the base and put a rank-``rank`` adapter on every linear layer of every block."""
+    model.freeze()
+    linear_to_lora_layers(model, len(model.layers), {"rank": rank, "scale": scale, "dropout": 0.0})
+
+
+def fused_weights(model) -> dict[str, mx.array]:
+    """The model's weights, with each adapter folded into the linear layer it adapts."""
+    weights = dict(tree_flatten(model.parameters()))
+    for name, module in model.named_modules():
+        if isinstance(module, LoRALinear):
+            for part in ("linear.weight", "lora_a", "lora_b"):
+                del weights[f"{name}.{part}"]
+            weights[f"{name}.weight"] = module.fuse().weight
+    return weights
+
+
 def save(model, base: Path, out: Path):
     out.mkdir(parents=True, exist_ok=True)
-    mx.save_safetensors(str(out / "model.safetensors"), dict(tree_flatten(model.parameters())))
+    mx.save_safetensors(str(out / "model.safetensors"), fused_weights(model))
     for name in CONFIG_FILES:
         if (base / name).exists():
             shutil.copyfile(base / name, out / name)
@@ -100,12 +123,16 @@ def main():
     parser.add_argument("--tokens-per-batch", type=int, default=8192)
     parser.add_argument("--warmup-share", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=2027)
+    parser.add_argument("--lora-rank", type=int, default=0, help="train adapters of this rank; 0 trains every weight")
+    parser.add_argument("--lora-scale", type=float, default=2.0)
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
     mx.random.seed(args.seed)
     base = Path(snapshot_download(args.base)) if not Path(args.base).exists() else Path(args.base)
     model, tokenizer = load(str(base))
+    if args.lora_rank:
+        add_adapters(model, args.lora_rank, args.lora_scale)
     train = examples(args.data / "train.jsonl", tokenizer)
     val = examples(args.data / "val.jsonl", tokenizer)
     steps_per_epoch = sum(1 for _ in batches(train, args.tokens_per_batch, False, rng))

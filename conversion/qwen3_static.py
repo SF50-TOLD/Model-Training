@@ -101,6 +101,7 @@ class Qwen3Static(nn.Module):
     @classmethod
     def from_pretrained(cls, path: Path, max_context: int, dtype: torch.dtype) -> Qwen3Static:
         cfg = json.loads((path / "config.json").read_text())
+        assert cfg["tie_word_embeddings"], "the LM head is the embedding; Qwen3-8B and larger have their own"
         model = cls(cfg, max_context, dtype)
         state = {k.removeprefix("model."): v for k, v in load_file(path / "model.safetensors").items()}
         state.pop("lm_head.weight", None)
