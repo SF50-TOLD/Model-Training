@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Download every NOTAM from the NOTAM API and merge it with the legacy snapshot.
+"""Download every NOTAM from the NOTAM API and merge it with every earlier snapshot.
 
 Writes the raw download to data/notams_<date>.jsonl.gz and the merged,
-deduplicated corpus to data/corpus.jsonl.gz. The legacy data/all_notams.json
-is read, never written.
+deduplicated corpus to data/corpus.jsonl.gz. The API only holds NOTAMs that
+are still current, so the corpus merges every raw download (newest first)
+and then the legacy data/all_notams.json; a NOTAM that has since expired stays
+in the corpus. Raw downloads and the legacy snapshot are read, never written.
 """
 
 import argparse
@@ -47,12 +49,20 @@ def main():
         corpus.write_jsonl_gz(raw_path, fresh.values())
         print(f"Wrote {len(fresh):,} NOTAMs to {raw_path}")
 
-    fresh_records = (corpus.corpus_record(n, "2026-09") for n in corpus.read_jsonl_gz(raw_path))
+    downloads = sorted(DATA_DIR.glob("notams_*.jsonl.gz"), reverse=True)
     legacy = json.loads(LEGACY_SNAPSHOT.read_text(encoding="utf-8")) if LEGACY_SNAPSHOT.exists() else []
-    legacy_records = (corpus.corpus_record(n, "2025-11") for n in legacy)
-    merged = corpus.merge(fresh_records, legacy_records)
+    merged = corpus.merge(
+        *(_snapshot_records(path) for path in downloads),
+        (corpus.corpus_record(n, "2025-11") for n in legacy),
+    )
     corpus.write_jsonl_gz(CORPUS, merged)
-    print(f"Merged corpus: {len(merged):,} NOTAMs ({len(legacy):,} legacy) → {CORPUS}")
+    print(f"Merged corpus: {len(merged):,} NOTAMs ({len(downloads)} downloads, {len(legacy):,} legacy) → {CORPUS}")
+
+
+def _snapshot_records(path):
+    """A raw download's corpus records, sourced by the month in its ``notams_<date>`` name."""
+    month = path.name.removeprefix("notams_")[:7]
+    return (corpus.corpus_record(n, month) for n in corpus.read_jsonl_gz(path))
 
 
 if __name__ == "__main__":
