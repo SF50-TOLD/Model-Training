@@ -14,6 +14,7 @@ from pathlib import Path
 
 from notam_gold import db
 from notam_gold.prompt import build_prompt
+from notam_gold.reviews import stale_reviews
 from notam_gold.schema import canonicalize, schema_version, validate
 
 DEV_FRACTION = 0.4
@@ -55,9 +56,12 @@ def split_of(notam_key: str) -> str:
 
 
 def gold_rows(connection: sqlite3.Connection) -> list[GoldRow]:
-    """Every accepted or edited review, validated and canonicalised."""
+    """Every accepted or edited review made under the current rules, validated and canonicalised."""
     rows = []
+    stale = stale_reviews(connection)
     for row in connection.execute(GOLD_SQL):
+        if row["id"] in stale:
+            continue
         extraction = db.loads(row["gold"])
         if problems := validate(extraction):
             raise InvalidGoldLabelError(f"{row['id']}: {[p.to_dict() for p in problems]}")

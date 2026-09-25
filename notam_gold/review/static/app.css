@@ -108,7 +108,11 @@ input[type="number"] { width: 6.5rem; }
 
 .status-pill { font-size: 0.8rem; padding: 0.05rem 0.5rem; border-radius: 999px; border: 1px solid var(--rule); }
 .status-pill[data-status="accepted"], .status-pill[data-status="edited"] { border-color: var(--green); color: var(--green); }
-.status-pill[data-status="ambiguous"] { border-color: var(--amber); color: var(--amber); }
+.status-pill[data-status="ambiguous"], .status-pill[data-status="stale"] { border-color: var(--amber); color: var(--amber); }
+
+.stale { border: 1px solid var(--amber); background: var(--amber-wash); border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 0.75rem; }
+.stale p { margin: 0 0 0.3rem; }
+.stale ul { margin: 0 0 0.5rem; padding-left: 1.2rem; font-size: 0.85rem; }
 
 /* Two panes */
 main {

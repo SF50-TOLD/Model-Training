@@ -1,6 +1,7 @@
 """Local web app for reviewing silver labels into gold labels, one NOTAM per screen."""
 
 import sqlite3
+from collections import Counter
 from pathlib import Path
 from typing import Literal
 
@@ -13,6 +14,7 @@ from notam_gold import db
 from notam_gold.coords import parse_position
 from notam_gold.labeling import evidence_problems
 from notam_gold.prompt import build_prompt
+from notam_gold.reviews import stale_reviews
 from notam_gold.schema import canonicalize, schema, validate
 from notam_gold.strata import ALL_STRATA
 
@@ -81,8 +83,13 @@ SELECT notam.id AS key, notam.notam_id, notam.icao_location, notam.selected_stra
 FROM notam
 LEFT JOIN disagreement ON disagreement.notam_key = notam.id
 LEFT JOIN current_review ON current_review.notam_key = notam.id
-ORDER BY (current_review.status IS NOT NULL), score DESC, notam.selection_rank
+ORDER BY notam.selection_rank
 """
+OPEN_STATUSES = ("unreviewed", "stale")
+
+
+def _queue_status(row: sqlite3.Row, stale: dict) -> str:
+    return "stale" if row["key"] in stale else row["status"] or "unreviewed"
 
 
 def create_app(database: Path, reviewer: str) -> FastAPI:
@@ -119,8 +126,9 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
     @app.get("/api/queue")
     async def queue(stratum: str | None = None, disagreement: bool = False, status: str = "all"):
         items = []
+        stale = stale_reviews(connection)
         for row in connection.execute(QUEUE_SQL):
-            reviewed_status = row["status"] or "unreviewed"
+            reviewed_status = _queue_status(row, stale)
             if stratum and row["selected_stratum"] != stratum:
                 continue
             if disagreement and not row["score"]:
@@ -139,18 +147,17 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
                     "status": reviewed_status,
                 }
             )
+        items.sort(key=lambda item: (item["status"] not in OPEN_STATUSES, -item["score"]))
         return {"items": items, "reviewer": reviewer}
 
     @app.get("/api/progress")
     async def progress():
-        rows = connection.execute(
-            "SELECT selected_stratum AS stratum, COUNT(*) AS total,"
-            " COUNT(current_review.id) FILTER (WHERE current_review.status != 'skipped') AS reviewed"
-            " FROM notam LEFT JOIN current_review ON current_review.notam_key = notam.id"
-            " GROUP BY selected_stratum"
-        ).fetchall()
-        by_stratum = {row["stratum"]: {"total": row["total"], "reviewed": row["reviewed"]} for row in rows}
-        return [{"stratum": s, **by_stratum[s]} for s in ALL_STRATA if s in by_stratum]
+        stale = stale_reviews(connection)
+        totals, reviewed = Counter(), Counter()
+        for row in connection.execute(QUEUE_SQL):
+            totals[row["selected_stratum"]] += 1
+            reviewed[row["selected_stratum"]] += _queue_status(row, stale) not in (*OPEN_STATUSES, "skipped")
+        return [{"stratum": s, "total": totals[s], "reviewed": reviewed[s]} for s in ALL_STRATA if totals[s]]
 
     @app.get("/api/notam")
     async def notam(key: str):
@@ -172,6 +179,7 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
             "silverB": _silver(connection, key, "B"),
             "disagreements": db.loads(disagreement["paths"]) if disagreement else [],
             "review": _current_review(connection, key),
+            "staleDifferences": [d.to_dict() for d in stale_reviews(connection).get(key, [])],
         }
 
     @app.post("/api/validate")

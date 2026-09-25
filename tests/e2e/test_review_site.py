@@ -2,14 +2,14 @@
 
 from playwright.sync_api import expect
 
-from tests.e2e.site import BZN, DTW, JNU, LIRR, MSN, QUEUE, SFO, SFO_LABEL, TPA
+from tests.e2e.site import BZN, DTW, JNU, LIRR, MSN, ORD, ORD_NEW_RULES, QUEUE, SFO, SFO_LABEL, TPA
 from tests.factories import contaminant, declared, effect, extraction, length, obstacle, surface
 
 
 def test_opens_on_the_biggest_disagreement(review):
     review.expect_on(LIRR)
     expect(review.counter).to_have_text(f"1 of {len(QUEUE)}")
-    expect(review.page.locator(".progress li")).to_have_count(6)
+    expect(review.page.locator(".progress li")).to_have_count(7)
     expect(review.progress("Obstacle")).to_have_text("0/1")
 
 
@@ -133,7 +133,7 @@ def test_reviewed_notams_leave_the_unreviewed_filter(review):
     review.press("a")
     expect(review.message).to_have_text(f"Saved {SFO} as accepted.")
     review.filter_status("Unreviewed")
-    expect(review.counter).to_have_text(f"1 of {len(QUEUE) - 1}")
+    expect(review.counter).to_have_text(f"1 of {len(QUEUE) - 2}")
     review.filter_status("Accepted or edited")
     review.expect_on(SFO)
     expect(review.page.locator(".status-pill")).to_have_text("Accepted")
@@ -331,3 +331,26 @@ def test_shortcuts_do_not_fire_while_typing(review, gold_db):
     expect(review.page.get_by_label("Note")).to_have_value("jam")
     review.expect_on(SFO)
     assert gold_db.reviews(SFO) == []
+
+
+def test_a_review_overtaken_by_new_rules_comes_back_for_re_review(review, gold_db):
+    expect(review.progress("Full closure")).to_have_text("0/1")
+    review.filter_status("Needs re-review")
+    review.expect_on(ORD)
+    expect(review.page.locator(".status-pill")).to_have_text("Needs re-review")
+    banner = review.page.get_by_role("note")
+    expect(banner).to_contain_text("The labelling rules changed after this was saved as accepted.")
+    expect(banner).to_contain_text("effects[B:0]")
+    expect(review.page.get_by_role("textbox", name="Runway")).to_have_value("10L/28R")
+
+    banner.get_by_role("button", name="Restore my saved label").click()
+    expect(review.page.get_by_text("No effects.")).to_be_visible()
+    review.page.reload()
+
+    review.filter_status("Needs re-review")
+    review.press("a")
+    expect(review.message).to_have_text(f"Saved {ORD} as accepted.")
+    assert gold_db.reviews(ORD)[-1]["extraction"] == ORD_NEW_RULES
+    expect(review.progress("Full closure")).to_have_text("1/1")
+    review.filter_status("Needs re-review")
+    expect(review.page.get_by_text("Nothing matches these filters.")).to_be_visible()

@@ -11,17 +11,23 @@ JNU = "PAJN A4/2026"
 TPA = "KTPA A5/2026"
 MSN = "KMSN A6/2026"
 LIRR = "LIRR A7/2026"
+ORD = "KORD A8/2026"
 
 # The queue's default order: unreviewed first, highest disagreement score first, then selection rank.
-QUEUE = [LIRR, DTW, BZN, SFO, JNU, TPA, MSN]
+QUEUE = [LIRR, DTW, BZN, SFO, JNU, TPA, MSN, ORD]
 
 SFO_LABEL = extraction(
     effect("28L", declaredDistances=declared(length(10810), length(10810), length(10981), length(10275)))
 )
 
 
+ORD_OLD_RULES = extraction()
+ORD_NEW_RULES = extraction(effect("10L/28R", "full"))
+
+
 def seed(gold_db):
-    """Seven NOTAMs covering agreement, field and effect disagreements, cancellation, and no silver label."""
+    """Eight NOTAMs: agreement, field and effect disagreements, cancellation, no silver label, and a
+    review saved before a relabel under new rules."""
     key = gold_db.add_notam(
         "A1/2026",
         "KSFO",
@@ -77,6 +83,10 @@ def seed(gold_db):
     gold_db.add_disagreement(
         key, gold_db.add_silver(key, extraction()), gold_db.add_silver(key, label_b, run="B"), extraction(), label_b
     )
+    key = gold_db.add_notam("A8/2026", "KORD", "ORD RWY 10L/28R CLSD", stratum="full_closure", rank=7)
+    gold_db.add_silver(key, ORD_OLD_RULES, created_at="2026-09-24T20:00:00+00:00")
+    gold_db.add_review(key, "accepted", ORD_OLD_RULES, reviewed_at="2026-09-24T21:00:00+00:00")
+    gold_db.add_silver(key, ORD_NEW_RULES, created_at="2026-09-25T09:00:00+00:00")
     gold_db.connection.commit()
 
 
@@ -139,9 +149,11 @@ class ReviewPage:
 
     def filter_stratum(self, name: str):
         self.page.get_by_role("combobox", name="Stratum").select_option(label=name)
+        self.page.wait_for_load_state("networkidle")
 
     def filter_status(self, name: str):
         self.page.get_by_role("combobox", name="Show").select_option(label=name)
+        self.page.wait_for_load_state("networkidle")
 
     def progress(self, stratum: str):
         return self.page.locator(".progress li", has_text=stratum).locator(".n")

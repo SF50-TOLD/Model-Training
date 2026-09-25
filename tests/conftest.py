@@ -22,6 +22,10 @@ class GoldDatabase:
             (name, model, db.now()),
         ).lastrowid
 
+    def _labelled(self, run_id, key):
+        query = "SELECT 1 FROM silver_label WHERE run_id = ? AND notam_key = ?"
+        return self.connection.execute(query, (run_id, key)).fetchone() is not None
+
     def add_notam(self, notam_id, location="KSFO", text="RWY 28L CLSD", nms_type="N", stratum="full_closure", rank=0):
         key = f"{location} {notam_id}"
         self.connection.execute(
@@ -30,11 +34,14 @@ class GoldDatabase:
         )
         return key
 
-    def add_silver(self, key, extraction, run="A", evidence=(), note=None):
+    def add_silver(self, key, extraction, run="A", evidence=(), note=None, created_at=None):
+        run_id = self.run_ids[run]
+        if self._labelled(run_id, key):
+            run_id = self.run_ids[run] = self._add_run(run, "relabel")
         return self.connection.execute(
             "INSERT INTO silver_label (run_id, notam_key, extraction, evidence, note, problems, response, usage,"
             " created_at) VALUES (?, ?, ?, ?, ?, '[]', '{}', '{}', ?)",
-            (self.run_ids[run], key, db.dumps(extraction), db.dumps(list(evidence)), note, db.now()),
+            (run_id, key, db.dumps(extraction), db.dumps(list(evidence)), note, created_at or db.now()),
         ).lastrowid
 
     def add_disagreement(self, key, label_a, label_b, a, b):
@@ -44,11 +51,11 @@ class GoldDatabase:
             (key, label_a, label_b, db.dumps([d.to_dict() for d in differences]), score(differences)),
         )
 
-    def add_review(self, key, status, extraction, silver_id=None, edited=False):
+    def add_review(self, key, status, extraction, silver_id=None, edited=False, reviewed_at=None):
         self.connection.execute(
             "INSERT INTO review (notam_key, silver_label_id, reviewer, reviewed_at, status, extraction, note, edited)"
             " VALUES (?, ?, 'Tester', ?, ?, ?, NULL, ?)",
-            (key, silver_id, db.now(), status, db.dumps(extraction), int(edited)),
+            (key, silver_id, reviewed_at or db.now(), status, db.dumps(extraction), int(edited)),
         )
 
     def reviews(self, key) -> list[dict]:

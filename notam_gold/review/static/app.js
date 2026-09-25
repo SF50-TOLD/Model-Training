@@ -17,6 +17,7 @@ const STATUS_LABELS = {
   edited: "Edited",
   ambiguous: "Ambiguous",
   skipped: "Skipped",
+  stale: "Needs re-review",
 };
 
 async function api(path, options = {}) {
@@ -137,7 +138,8 @@ document.addEventListener("alpine:init", () => {
       const notam = await this.fetchNotam(key);
       if (this.queue[this.index]?.key !== key) return;
       this.current = notam;
-      const start = notam.review?.extraction ?? notam.silverA?.extraction ?? emptyExtraction();
+      const silver = notam.silverA?.extraction ?? emptyExtraction();
+      const start = this.isStale(notam) ? silver : (notam.review?.extraction ?? silver);
       this.form = copy(start);
       this.note = notam.review?.note ?? "";
       this.message = "";
@@ -147,6 +149,14 @@ document.addEventListener("alpine:init", () => {
         const neighbour = this.queue[index + offset];
         if (neighbour) this.fetchNotam(neighbour.key);
       }
+    },
+
+    isStale(notam = this.current) {
+      return (notam?.staleDifferences.length ?? 0) > 0;
+    },
+    restoreSavedLabel() {
+      this.form = copy(this.current.review.extraction);
+      this.changed();
     },
 
     async go(step) {

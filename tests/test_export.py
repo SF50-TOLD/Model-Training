@@ -58,3 +58,12 @@ def test_refuses_to_export_an_invalid_label(gold_db, tmp_path):
     gold_db.add_review(key, "accepted", extraction(effect("28L", "none")))
     with pytest.raises(InvalidGoldLabelError):
         export(gold_db.connection, tmp_path)
+
+
+def test_leaves_out_reviews_the_labelling_rules_have_changed(gold_db, tmp_path):
+    key = gold_db.add_notam("D1/2026")
+    gold_db.add_silver(key, extraction(), created_at="2026-09-24T20:00:00+00:00")
+    gold_db.add_review(key, "accepted", extraction(), reviewed_at="2026-09-24T21:00:00+00:00")
+    gold_db.add_silver(key, extraction(effect("28L", "full")), created_at="2026-09-25T09:00:00+00:00")
+    export(gold_db.connection, tmp_path)
+    assert (tmp_path / "notam_gold.jsonl").read_text() == ""

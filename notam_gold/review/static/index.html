@@ -31,6 +31,7 @@
       <select x-model="filters.status" @change="reload()">
         <option value="all">All</option>
         <option value="unreviewed">Unreviewed</option>
+        <option value="stale">Needs re-review</option>
         <option value="reviewed">Accepted or edited</option>
         <option value="ambiguous">Ambiguous</option>
         <option value="skipped">Skipped</option>
@@ -84,6 +85,18 @@
   </section>
 
   <section class="label" aria-label="Label">
+    <div class="stale" x-show="isStale()" role="note">
+      <p>
+        The labelling rules changed after this was saved as <strong x-text="statusLabel(current?.review?.status).toLowerCase()"></strong>.
+        The form shows the relabelled silver label. Your saved label had:
+      </p>
+      <ul>
+        <template x-for="d in current?.staleDifferences || []" :key="d.path">
+          <li><code x-text="d.path || 'the whole label'"></code> <span x-text="short(d.a)"></span> → <span x-text="short(d.b)"></span></li>
+        </template>
+      </ul>
+      <button type="button" @click="restoreSavedLabel()">Restore my saved label</button>
+    </div>
     <form @submit.prevent="save()" @input="changed()" @change="changed()">
       <div class="row top">
         <label class="toggle" @mouseenter="hoverPath = 'isCanceled'" @mouseleave="hoverPath = null">
