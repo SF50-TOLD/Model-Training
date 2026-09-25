@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from notam_gold.paths import SCHEMA_FILE
 
 CLOSURE_ORDER = {"none": 0, "full": 1, "partial": 2}
+RELATIVE_ENDS = ("thresholdEnd", "departureEnd")
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,8 @@ def _effect_problems(path: str, effect: dict):
     for field in ("declaredDistances", "thresholdDisplacement"):
         if effect[field] is not None and not _is_single_direction(effect["runway"]):
             yield Problem(f"{path}.runway", f"{field} requires a single-direction runway")
+    if effect["closedEnd"] in RELATIVE_ENDS and not _is_single_direction(effect["runway"]):
+        yield Problem(f"{path}.closedEnd", f"{effect['closedEnd']} requires a single-direction runway")
     if effect["closure"] == "none" and all(effect[f] is None for f in _FACT_FIELDS):
         yield Problem(path, "Effect states nothing; remove it")
     for field in ("closedLength", "thresholdDisplacement"):

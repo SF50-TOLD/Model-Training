@@ -1,6 +1,6 @@
 # NOTAM extraction schema
 
-This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.3.0). The same contract is used in three places:
+This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.4.0). The same contract is used in three places:
 
 - the silver labeler's instructions;
 - the human review tool;
@@ -34,7 +34,7 @@ Every key is always present. Optional values are an explicit `null`, never omitt
 | `runway` | string? | The designator exactly as the text writes it, normalised to `^\d{2}[LCR]?(/\d{2}[LCR]?)?$`: zero-pad (`9R` → `09R`), and write a pair with a slash (`18C-36C` → `18C/36C`). Use `null` when the effect applies to the aerodrome or to all runways, or when the text names no runway (`RWY` with no number, or an obstacle with no runway reference). Never infer the designator from the airport's layout. |
 | `closure` | `none` / `full` / `partial` | What this effect states about closure. `full`: the runway is stated closed (`CLSD`, `CLOSED`, `NOT AVBL`), including closures with exceptions (`CLSD EXC PPR`, `CLSD EXC SKED ACFT`). `partial`: a stated portion is closed (`W 1713FT CLSD`, `CLOSED FIRST 1,500 FT`, `N OF TWY K CLSD`). `none`: the effect states no closure. |
 | `closedLength` | Length? | Length of the closed portion, only when `closure` is `partial` and the length is stated. |
-| `closedEnd` | string? | Where the closed portion is, as stated, only when `closure` is `partial`. Write it as a compass abbreviation (`NORTH END` → `N`, `W` → `W`) or a runway end (`27L`). Use `null` when the text doesn't say which end (`FIRST 1,500 FT`), or states a position relative to a taxiway (`N OF TWY K`). |
+| `closedEnd` | string? | Where the closed portion is, as stated, only when `closure` is `partial`. Write it as one of: a compass abbreviation (`NORTH END` → `N`, `W` → `W`); a runway end (`27L`); or, for a portion counted from one end of the effect's runway, `thresholdEnd` (`FIRST`/`FST 1500FT RWY 34`) or `departureEnd` (`LAST 90M RWY 10`). `thresholdEnd` and `departureEnd` are relative to the effect's `runway` and require a single direction. Use `null` when the text doesn't say where: FIRST or LAST given against a runway pair (`RWY 24L/6R CLOSED FIRST 1,500 FT`), or a position relative to a taxiway (`N OF TWY K`). When a NOTAM closes portions at both ends of different directions, each direction gets its own effect. |
 | `thresholdDisplacement` | Length? | The stated displacement of this runway's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). A relocated threshold (`THR RELOCATED 1040FT`) is recorded here too: it shortens the runway, and that shortening is what the app needs. Requires a single-direction `runway`. |
 | `declaredDistances` | DeclaredDistances? | Declared distances as stated for this direction. Requires a single-direction `runway`. Use `null` when the text states none, or when no unit can be found for them (see Units). |
 | `surfaceCondition` | SurfaceCondition? | A runway condition report: FAA `FICON`, Canadian `RSC`, or an ICAO `SNOWTAM` (GRF runway condition report). |
@@ -544,7 +544,7 @@ Location: NKX
 RWY 24L/6R CLOSED FIRST 1,500 FT FOR CONCRETE DEMO. LAST 6,500 FT OF RWY USED FOR CONSTRUCTION VEHICLES AND HAUL ROUTES.
 ```
 
-"6R" is zero-padded to "06R" and "1,500" becomes 1500. "FIRST" does not say which end, so closedEnd is null.
+"6R" is zero-padded to "06R" and "1,500" becomes 1500. FIRST is given against the pair, not one direction, so closedEnd is null.
 
 ```json
 {
@@ -558,6 +558,51 @@ RWY 24L/6R CLOSED FIRST 1,500 FT FOR CONCRETE DEMO. LAST 6,500 FT OF RWY USED FO
         "unit": "ft"
       },
       "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null,
+      "obstacle": null
+    }
+  ]
+}
+```
+
+### Closed portions counted from each end
+
+```text
+Location: SBTA
+
+RWY 08 FST 100M AND RWY 26 LAST 100M CLSD DUE TO HOLE
+RMK: THIS AERONAUTICAL INFORMATION WILL BE EXTENDED BY AN AIP SUP
+```
+
+FIRST (FST) is counted from the named runway's threshold and LAST from its departure end. Each direction the text names gets its own effect.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "08",
+      "closure": "partial",
+      "closedLength": {
+        "value": 100,
+        "unit": "m"
+      },
+      "closedEnd": "thresholdEnd",
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null,
+      "obstacle": null
+    },
+    {
+      "runway": "26",
+      "closure": "partial",
+      "closedLength": {
+        "value": 100,
+        "unit": "m"
+      },
+      "closedEnd": "departureEnd",
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": null,

@@ -51,6 +51,7 @@ def test_missing_keys_are_schema_errors():
         (extraction(effect(obstacle=obstacle())), "effects[0].obstacle"),
         (extraction(effect(obstacle=obstacle(latitude=40.0))), "effects[0].obstacle.latitude"),
         (extraction(effect("09", "full"), effect("09", "full")), "effects[1]"),
+        (extraction(effect("16/34", "partial", closedEnd="thresholdEnd")), "effects[0].closedEnd"),
         (
             extraction(
                 effect("30", thresholdDisplacement=length(357)),
