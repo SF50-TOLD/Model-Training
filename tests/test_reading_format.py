@@ -17,7 +17,7 @@ def test_writes_only_what_is_stated_in_a_fixed_order():
     pair = effect("09R/27L", "partial", closedLength=length(1713), closedEnd="W")
     direction = effect("09R", declaredDistances=declared(TORA=length(6787), LDA=length(6100)))
     assert reading_format.encode(extraction(pair, direction)) == (
-        "RWY 09R DD 6787ft - - 6100ft\nRWY 09R/27L CLSD PART LEN 1713ft END W"
+        "RWY 09R DD TORA 6787ft LDA 6100ft\nRWY 09R/27L CLSD PART LEN 1713ft END W"
     )
 
 

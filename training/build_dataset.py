@@ -166,7 +166,7 @@ def is_validation(notam: sqlite3.Row) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--variants", type=int, default=3, help="augmented variants per scarce training NOTAM")
+    parser.add_argument("--variants", type=int, default=5, help="augmented variants per scarce training NOTAM")
     args = parser.parse_args()
     rng = random.Random(AUGMENT_SEED)
     gold = gold_keys()

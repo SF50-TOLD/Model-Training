@@ -7,7 +7,8 @@ contaminants in canonical order, fields in a fixed order, numbers in their short
 
     CNL                         the NOTAM is a cancellation
     NIL                         nothing affects runway performance
-    RWY <rwy|*> [CLSD [PART]] [LEN <len>] [END <end>] [DTHR <len>] [DD <len|-> <len|-> <len|-> <len|->]
+    RWY <rwy|*> [CLSD [PART]] [LEN <len>] [END <end>] [DTHR <len>]
+        [DD [TORA <len>] [TODA <len>] [ASDA <len>] [LDA <len>]]
         [SFC [CC <n>[/<n>...]] <contaminant>[,<contaminant>...]|-]
         [OBST [AGL <len>] [MSL <len>] [DIST <len>] [REF "<text>"] [BRG <n>] [POS <lat> <lon>]]
 
@@ -91,7 +92,7 @@ def _effect(effect: dict, positions: list[tuple[str, str]]) -> str:
     if effect["thresholdDisplacement"]:
         parts += ["DTHR", measure(effect["thresholdDisplacement"])]
     if declared := effect["declaredDistances"]:
-        parts += ["DD"] + [measure(declared[k]) if declared[k] else ABSENT for k in DECLARED]
+        parts += ["DD"] + [part for k in DECLARED if declared[k] for part in (k, measure(declared[k]))]
     if condition := effect["surfaceCondition"]:
         parts += ["SFC"]
         if condition["rwyCC"] is not None:
@@ -160,7 +161,7 @@ def _decode_effect(line: str) -> dict:
     if _take(tokens, "DTHR"):
         effect["thresholdDisplacement"] = _measure(tokens.pop(0))
     if _take(tokens, "DD"):
-        effect["declaredDistances"] = {k: _optional_measure(tokens.pop(0)) for k in DECLARED}
+        effect["declaredDistances"] = {k: _measure(tokens.pop(0)) if _take(tokens, k) else None for k in DECLARED}
     if _take(tokens, "SFC"):
         codes = [int(c) for c in tokens.pop(0).split("/")] if _take(tokens, "CC") else None
         listed = tokens.pop(0)
@@ -234,7 +235,3 @@ def _measure(text: str) -> dict:
     if not match:
         raise ValueError(f"not a measurement: {text!r}")
     return {"value": _number(match.group(1)), "unit": match.group(2)}
-
-
-def _optional_measure(text: str) -> dict | None:
-    return None if text == ABSENT else _measure(text)
