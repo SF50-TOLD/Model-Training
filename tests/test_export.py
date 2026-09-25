@@ -67,3 +67,23 @@ def test_leaves_out_reviews_the_labelling_rules_have_changed(gold_db, tmp_path):
     gold_db.add_silver(key, extraction(effect("28L", "full")), created_at="2026-09-25T09:00:00+00:00")
     export(gold_db.connection, tmp_path)
     assert (tmp_path / "notam_gold.jsonl").read_text() == ""
+
+
+def test_worked_examples_are_flagged_and_kept_out_of_the_test_half(gold_db, tmp_path, monkeypatch):
+    keys = [gold_db.add_notam(f"E{n}/2026", text=f"RWY {n:02} CLSD") for n in range(1, 30)]
+    for key in keys:
+        gold_db.add_review(key, "accepted", extraction(effect(f"{int(key.split('E')[1].split('/')[0]):02}", "full")))
+    example = next(k for k in keys if split_of(k) == "test")
+    example_prompt = (
+        "Location: KSFO\n\n"
+        + gold_db.connection.execute("SELECT notam_text FROM notam WHERE id = ?", (example,)).fetchone()[0]
+    )
+    monkeypatch.setattr("notam_gold.export.worked_example_prompts", lambda: {example_prompt})
+
+    export(gold_db.connection, tmp_path)
+
+    gold = {m["notamKey"]: m for m in read_jsonl(tmp_path / "notam_gold.meta.jsonl")}
+    test = {m["notamKey"] for m in read_jsonl(tmp_path / "notam_test.meta.jsonl")}
+    assert gold[example]["workedExample"] is True
+    assert example not in test
+    assert sum(not m["workedExample"] for m in gold.values()) == len(keys) - 1

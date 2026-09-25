@@ -1,6 +1,6 @@
 # NOTAM extraction schema
 
-This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.2.0). The same contract is used in three places:
+This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.3.0). The same contract is used in three places:
 
 - the silver labeler's instructions;
 - the human review tool;
@@ -35,7 +35,7 @@ Every key is always present. Optional values are an explicit `null`, never omitt
 | `closure` | `none` / `full` / `partial` | What this effect states about closure. `full`: the runway is stated closed (`CLSD`, `CLOSED`, `NOT AVBL`), including closures with exceptions (`CLSD EXC PPR`, `CLSD EXC SKED ACFT`). `partial`: a stated portion is closed (`W 1713FT CLSD`, `CLOSED FIRST 1,500 FT`, `N OF TWY K CLSD`). `none`: the effect states no closure. |
 | `closedLength` | Length? | Length of the closed portion, only when `closure` is `partial` and the length is stated. |
 | `closedEnd` | string? | Where the closed portion is, as stated, only when `closure` is `partial`. Write it as a compass abbreviation (`NORTH END` → `N`, `W` → `W`) or a runway end (`27L`). Use `null` when the text doesn't say which end (`FIRST 1,500 FT`), or states a position relative to a taxiway (`N OF TWY K`). |
-| `thresholdDisplacement` | Length? | The stated displacement of this runway's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). Requires a single-direction `runway`. |
+| `thresholdDisplacement` | Length? | The stated displacement of this runway's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). A relocated threshold (`THR RELOCATED 1040FT`) is recorded here too: it shortens the runway, and that shortening is what the app needs. Requires a single-direction `runway`. |
 | `declaredDistances` | DeclaredDistances? | Declared distances as stated for this direction. Requires a single-direction `runway`. Use `null` when the text states none, or when no unit can be found for them (see Units). |
 | `surfaceCondition` | SurfaceCondition? | A runway condition report: FAA `FICON`, Canadian `RSC`, or an ICAO `SNOWTAM` (GRF runway condition report). |
 | `obstacle` | Obstacle? | A physical obstacle (crane, tower, rig, etc.) reported with a height or position. |
@@ -68,6 +68,10 @@ Every value is greater than zero.
 `TORA`, `TODA`, `ASDA`, `LDA`: each a `Length?`. Record the distances that are stated and leave the rest `null`; never copy one distance into another. A dash or `NIL` in a declared-distance table is `null`. Parenthesised gradients (`2232(2.37)`) are not recorded.
 
 Declared distances that name no runway belong to the only runway direction the NOTAM names (`THR RWY 27 DISPLACED 200M … DECLARED DISTANCES CHANGED: TORA: 690M.` → runway `27`). If the NOTAM names more than one runway, or names only a pair (`RWY 09/27`), they have no direction, so they aren't recorded and the labeler notes it.
+
+Declared distances given for a runway pair (`RWY12R/30L LDA 320M`) apply to each direction: record one effect per direction, each with the same values.
+
+Distances measured from an intersection (`DIST FROM TWY B: RWY 10 - TORA-2123M`) are for intersection takeoffs, not the runway's declared distances. They aren't recorded.
 
 ## `SurfaceCondition`
 
@@ -144,7 +148,7 @@ The obstacle's `runway` is the runway the text relates it to (`APCH END RWY 03L`
 
 ## Scope rule
 
-A NOTAM gets effects only if it changes something the app models:
+The app is SF50 TOLD, for the Cirrus SF50 Vision Jet: a light, single-engine, fixed-wing jet (6,000 lb maximum takeoff weight, 39 ft wingspan). A NOTAM gets effects only if it changes something the app models:
 
 - runway availability or length (closures);
 - the threshold;
@@ -161,18 +165,22 @@ Everything else gets `effects: []`.
 | Taxiway or apron closures, and taxiway or apron FICONs (`TWY … FICON`, `APRON … FICON`) | `[]` |
 | Procedure minima, SID/STAR/IAP changes, circling restrictions | `[]` |
 | An obstacle named in an instrument approach procedure (IAP) or minima NOTAM (`IAP … TEMPORARY CRANE 809 MSL 1.36NM NW OF RWY 31`) | not recorded: approach obstacles are not takeoff obstacles; `[]` unless something else qualifies |
+| An obstacle named in an obstacle departure procedure (`ODP … TEMPORARY CRANE 4739 FT FROM DER`) | effect with `obstacle`: departure obstacles are takeoff obstacles |
+| An obstacle that exists only under a stated condition (`OBST EXISTS ONLY WHEN RAISED`) | not recorded |
 | Aerodrome or service hours, ATC, fuel, customs | `[]` |
 | Airspace, UAS/drone operations, parachuting, military activity | `[]` |
 | Obstacle **lights** unserviceable (`OBST LGT U/S`) | `[]` |
 | Runway markings, signs, ungrooved sections, rubber removal, grass cutting | `[]` |
-| A runway closed only to a class of aircraft (`CLSD TO ACFT WINGSPAN MORE THAN 118FT`, `CLSD TO ACFT OVER 12500LBS`) | `[]` |
+| A runway closed only to a class of aircraft that excludes the SF50 (`CLSD TO ACFT WINGSPAN MORE THAN 118FT`, `CLSD TO ACFT OVER 12500LBS`, `CLSD TO HEL`) | `[]` |
+| A runway closed to a class of aircraft that includes the SF50 (`CLSD TO JET TFC`, `CLSD TO FIXED WING ACFT`) | `closure: "full"` |
 | A runway closed with exceptions (`CLSD EXC PPR`) | `closure: "full"` |
 | Takeoff or landing not available in one direction only (`LDG RWY 16R NOT AVBL`) | not a closure; `[]` unless something else qualifies |
 | "Effective operating length", "available length" or "remaining" figures that aren't labelled as declared distances | not recorded |
 | A threshold that is no longer displaced, or declared distances "as published" | `[]` |
 | A runway FICON, even when it reports only `WET` | effect with `surfaceCondition` |
 | A crane or tower with a height or position and no runway reference | effect with `runway: null` and `obstacle` |
-| Helipads and water lanes | `[]` |
+| Helipad and water-lane closures and conditions | `[]` |
+| An obstacle at a heliport | effect with `obstacle`: which aerodromes matter is for the app to decide |
 
 ## Canonical ordering
 
@@ -1381,6 +1389,253 @@ An obstacle named in an approach-procedure NOTAM is not a takeoff obstacle, so i
 {
   "isCanceled": false,
   "effects": []
+}
+```
+
+### Relocated threshold
+
+```text
+Location: KTKI
+
+RWY 18 THR RELOCATED 1040FT S DECLARED DIST: TORA 5962FT TODA 5962FT ASDA 6462FT LDA 6462FT
+```
+
+A relocated threshold shortens the runway just as a displaced one does, so it is recorded as thresholdDisplacement.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "18",
+      "closure": "none",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": {
+        "value": 1040,
+        "unit": "ft"
+      },
+      "declaredDistances": {
+        "TORA": {
+          "value": 5962,
+          "unit": "ft"
+        },
+        "TODA": {
+          "value": 5962,
+          "unit": "ft"
+        },
+        "ASDA": {
+          "value": 6462,
+          "unit": "ft"
+        },
+        "LDA": {
+          "value": 6462,
+          "unit": "ft"
+        }
+      },
+      "surfaceCondition": null,
+      "obstacle": null
+    }
+  ]
+}
+```
+
+### Declared distances for a runway pair
+
+```text
+Location: EFRY
+
+RWY12R THR TEMPO DISPLACED 160M INWARDS, RWY12R/30L LDA 320M
+```
+
+Declared distances given for a pair apply to each direction.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "12R",
+      "closure": "none",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": {
+        "value": 160,
+        "unit": "m"
+      },
+      "declaredDistances": {
+        "TORA": null,
+        "TODA": null,
+        "ASDA": null,
+        "LDA": {
+          "value": 320,
+          "unit": "m"
+        }
+      },
+      "surfaceCondition": null,
+      "obstacle": null
+    },
+    {
+      "runway": "30L",
+      "closure": "none",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": {
+        "TORA": null,
+        "TODA": null,
+        "ASDA": null,
+        "LDA": {
+          "value": 320,
+          "unit": "m"
+        }
+      },
+      "surfaceCondition": null,
+      "obstacle": null
+    }
+  ]
+}
+```
+
+### Intersection takeoff distances
+
+```text
+Location: UHMM
+
+AFTER RECONSTRUCTION TWY B AND TWY F PUT INTO OPERATION
+FOR ALL ACFT TYPES WO WEIGHT RESTRICTIONS. TWY WIDTH AVBL 22.5M.
+TWY 2 RENAMED TO TWY B, MAIN TWY RENAMED TO TWY F.
+DIST FROM TWY B:
+RWY 10 - TORA-2123M, TODA-2511M, ASDA-2123M,
+RWY 28 - TORA-1352M, TODA-1752M, ASDA-1352M.
+```
+
+Distances from TWY B are for intersection takeoffs, not declared distances, and nothing else here affects a runway.
+
+```json
+{
+  "isCanceled": false,
+  "effects": []
+}
+```
+
+### Closed to a class that includes the SF50
+
+```text
+Location: LTBG
+
+RWY 18/36 CLSD TO JET TFC.
+-DUE TO CONST WORKS AT THR 36
+
+SOUTHERN HOOK BARRIER IS LOCATED 1499FT INNER SIDE OF THR 36. 
+FOR CARGO ACFT AND HELICOPTERS, IF LANDING DIRECTION IS 36 TFCS 
+SHALL PLAN TO TOUCH DOWN BEYOND THE HOOK BARRIER.
+```
+
+The SF50 is a jet, so a closure to jet traffic applies to it.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "18/36",
+      "closure": "full",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null,
+      "obstacle": null
+    }
+  ]
+}
+```
+
+### Closed to fixed-wing aircraft
+
+```text
+Location: NZNS
+
+GRASS RWY 02/20 CLSD TO FIXED WING ACFT
+```
+
+The SF50 is a fixed-wing aircraft, so the closure applies to it.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "02",
+      "closure": "full",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null,
+      "obstacle": null
+    },
+    {
+      "runway": "20",
+      "closure": "full",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null,
+      "obstacle": null
+    }
+  ]
+}
+```
+
+### Obstacle in a departure procedure
+
+```text
+Location: KEMT
+
+ODP SAN GABRIEL VALLEY, EL MONTE, CA.
+DIVERSE VECTOR AREA, AMDT 1 ...
+RWY 19, REQUIRES MINIMUM CLIMB OF 378 FT PER NM TO 600.
+TEMPORARY CRANE 4739 FT FROM DER, 785FT RIGHT OF CENTERLINE, 170FT AGL/440FT MSL (2025-AWP-2367-OE).
+ALL OTHER DATA REMAINS AS PUBLISHED. 2606041852-2701141852EST
+```
+
+Departure-procedure obstacles are takeoff obstacles, unlike obstacles named in approach procedures. The climb gradient is not recorded.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "19",
+      "closure": "none",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null,
+      "obstacle": {
+        "heightAGL": {
+          "value": 170,
+          "unit": "ft"
+        },
+        "heightMSL": {
+          "value": 440,
+          "unit": "ft"
+        },
+        "distance": {
+          "value": 4739,
+          "unit": "ft"
+        },
+        "distanceReference": "DER",
+        "bearingDegrees": null,
+        "latitude": null,
+        "longitude": null
+      }
+    }
+  ]
 }
 ```
 

@@ -27,6 +27,7 @@ Each `.jsonl` file has a matching `.meta.jsonl` file. Meta line *n* describes sa
 - `silverModel`, `silverPromptVersion`, `silverLabelId`
 - `silverDisagreement`, `disagreementPaths`
 - `metadataCanceled`: the NMS message type is C, whether or not the text says so
+- `workedExample`: the NOTAM is also a worked example in `SCHEMA.md` or the labeler prompt
 - `effectiveStart`, `effectiveEnd`
 
-A salted hash of `notamKey` assigns each NOTAM to dev or test. A NOTAM therefore stays in the same half when the set grows or is re-exported. The split is stratified in expectation; the export prints the per-stratum counts.
+A salted hash of `notamKey` assigns each NOTAM to dev or test. Worked examples never go in `notam_test.jsonl`, because the model may have seen their answers. A NOTAM therefore stays in the same half when the set grows or is re-exported. The split is stratified in expectation; the export prints the per-stratum counts.
