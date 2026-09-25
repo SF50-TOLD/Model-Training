@@ -8,22 +8,20 @@ __pycache__/
 .eggs/
 dist/
 build/
+.pytest_cache/
+.ruff_cache/
 
 # Environment
 venv/
+.venv/
 .env
 .python-version
 
 # Signing keys
 *.p8
 
-# Adapter training toolkit (downloaded)
-adapter_training_toolkit_v*/
-
-# Data files (large, generated)
+# Corpus, candidates, silver labels and reviews (large or local). The gold set lives in eval/.
 data/
-checkpoints/
-exports/
 
 # Backup files
 *.bak
