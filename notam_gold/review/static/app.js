@@ -288,15 +288,16 @@ document.addEventListener("alpine:init", () => {
       if (this.busy || !this.current) return;
       this.busy = true;
       try {
+        const key = this.current.key;
         const result = await api("/api/review", {
           method: "POST",
-          body: JSON.stringify({ key: this.current.key, status, extraction, note: this.note }),
+          body: JSON.stringify({ key, status, extraction, note: this.note }),
         });
         this.queue[this.index].status = result.status;
-        this.cache.delete(this.current.key);
+        this.cache.delete(key);
         this.refreshProgress();
         await this.go(1);
-        this.message = `Saved the previous NOTAM as ${this.statusLabel(result.status).toLowerCase()}.`;
+        this.message = `Saved ${key} as ${this.statusLabel(result.status).toLowerCase()}.`;
       } catch (error) {
         const problems = error.body?.detail?.problems;
         if (problems) this.problems = problems;

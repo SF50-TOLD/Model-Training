@@ -130,6 +130,8 @@ Writes the accepted and edited reviews to [`eval/`](eval/) in the Evaluations fr
 ruff check . && ruff format --check . && pytest
 ```
 
+`tests/e2e/` drives the review site in headless Chromium through Playwright. Each test gets the app running over its own freshly seeded temporary database, never `data/`. `setup.sh` installs the browser; to install it by hand, run `python -m playwright install chromium`.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE)
