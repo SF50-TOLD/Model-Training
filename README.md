@@ -129,6 +129,21 @@ Reviews are stored separately from silver labels and are append-only. Each revie
 
 Writes the accepted and edited reviews to [`eval/`](eval/) in the Evaluations framework's `ModelSample` shape. The export includes a stable dev/test split; see [`eval/README.md`](eval/README.md).
 
+## The training set
+
+Models trained here learn from silver-labelled corpus NOTAMs. Training data never includes a gold
+NOTAM, its reissues, or its text, and nothing from `eval/notam_dev.jsonl` or `eval/notam_test.jsonl`.
+Run these steps from the repository root.
+
+1. `swift run -c release --package-path ../iOS/NOTAMModel notam-corpus < <(gzip -dc data/corpus.jsonl.gz) > data/parsed.jsonl`
+   lists the NOTAMs the app's parsers read, which are left out.
+2. `python -m training.select_training --parsed data/parsed.jsonl` samples the training NOTAMs
+   into `data/notam_train.sqlite`.
+3. `python -m training.label_budgeted A --budget 180 --dual-only`, then `… B …`, then `… A …` labels
+   them in synchronous chunks sized so the worst case never passes the budget. Strata where run A
+   alone erred on reviewed gold get both runs and keep only agreements.
+4. `python -m training.build_dataset` writes `data/training/{train,val}.jsonl`.
+
 ## Tests
 
 ```bash
