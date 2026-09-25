@@ -167,6 +167,7 @@ Everything else gets `effects: []`.
 | An obstacle named in an instrument approach procedure (IAP) or minima NOTAM (`IAP … TEMPORARY CRANE 809 MSL 1.36NM NW OF RWY 31`) | not recorded: approach obstacles are not takeoff obstacles; `[]` unless something else qualifies |
 | An obstacle named in an obstacle departure procedure (`ODP … TEMPORARY CRANE 4739 FT FROM DER`) | effect with `obstacle`: departure obstacles are takeoff obstacles |
 | An obstacle that exists only under a stated condition (`OBST EXISTS ONLY WHEN RAISED`) | not recorded |
+| An obstacle in an en-route obstacle list (`REF AIP ENR 5.4`, low-flying-zone or vertical-obstacle lists) | not recorded: it is not in an aerodrome environment; `[]` unless something else qualifies |
 | Aerodrome or service hours, ATC, fuel, customs | `[]` |
 | Airspace, UAS/drone operations, parachuting, military activity | `[]` |
 | Obstacle **lights** unserviceable (`OBST LGT U/S`) | `[]` |
@@ -1052,7 +1053,13 @@ Each runway line is one effect, and SNOWTAM contaminants are always per third. D
 ```text
 Location: BGQQ
 
-SWBG0221 BGQQ 09241032 (SNOWTAM 0221 BGQQ 09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW/DRY SNOW  RWY 16 MEASURED FRICTION COEFFICIENTS 68/69/69 TAP. REMARK/ RWY 16  TAKEOFF SIGNIFICANT CONTAMINANT THIN RWYCC 5/5/5.)
+SWBG0221 BGQQ 09241032
+ (SNOWTAM 0221
+ BGQQ
+ 09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW/DRY SNOW
+ 
+ RWY 16 MEASURED FRICTION COEFFICIENTS 68/69/69 TAP. REMARK/ RWY 16 
+ TAKEOFF SIGNIFICANT CONTAMINANT THIN RWYCC 5/5/5.)
 ```
 
 The SNOWTAM format defines depth in millimetres. Friction coefficients are not recorded.
