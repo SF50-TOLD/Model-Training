@@ -1,6 +1,6 @@
 # NOTAM extraction schema
 
-This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.0.0). The same contract is used in three places:
+This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.1.0). The same contract is used in three places:
 
 - the silver labeler's instructions;
 - the human review tool;
@@ -8,7 +8,7 @@ This document explains, field by field, the contract defined in `notam_extractio
 
 ## Principles
 
-1. **Record only what the text states.** Never derive a value, and never fill a field from context, convention or common sense. When the text does not state a fact, the field is `null`. `null` is a real label: the evaluation scores it, because that is how it catches invented values.
+1. **Record only what the text states.** Never derive a value, and never fill a field from context, convention or common sense. The only exceptions are the unit rules listed under Units. When the text does not state a fact, the field is `null`. `null` is a real label: the evaluation scores it, because that is how it catches invented values.
 2. **Normalise the form, not the facts.** Units are recorded as written and never converted. Designators are recorded as written, zero-padded to two digits. Numbers lose their thousands separators and fractions become decimals (`1,500` → `1500`, `1/8IN` → `0.125`). Nothing is computed.
 3. **The app does the arithmetic.** The app itself derives these values, so the label never records them:
    - shortening (runway length minus TORA/LDA);
@@ -36,7 +36,7 @@ Every key is always present. Optional values are an explicit `null`, never omitt
 | `closedLength` | Length? | Length of the closed portion, only when `closure` is `partial` and the length is stated. |
 | `closedEnd` | string? | Where the closed portion is, as stated, only when `closure` is `partial`. Write it as a compass abbreviation (`NORTH END` → `N`, `W` → `W`) or a runway end (`27L`). Use `null` when the text doesn't say which end (`FIRST 1,500 FT`), or states a position relative to a taxiway (`N OF TWY K`). |
 | `thresholdDisplacement` | Length? | The stated displacement of this runway's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). Requires a single-direction `runway`. |
-| `declaredDistances` | DeclaredDistances? | Declared distances as stated for this direction. Requires a single-direction `runway`. Use `null` when the text states none, or states them with no unit (see Units). |
+| `declaredDistances` | DeclaredDistances? | Declared distances as stated for this direction. Requires a single-direction `runway`. Use `null` when the text states none, or when no unit can be found for them (see Units). |
 | `surfaceCondition` | SurfaceCondition? | A runway condition report: FAA `FICON`, Canadian `RSC`, or an ICAO `SNOWTAM` (GRF runway condition report). |
 | `obstacle` | Obstacle? | A physical obstacle (crane, tower, rig, etc.) reported with a height or position. |
 
@@ -52,7 +52,14 @@ When a NOTAM states facts about different designators, each designator gets its 
 | `Depth` | `value`: number, `unit` | `in`, `mm` |
 | `Distance` | `value`: number, `unit` | `ft`, `m`, `nm` |
 
-**Units.** The unit must be stated in the NOTAM for that value: on the value itself (`1665M`, `10810FT`), or in the header of the table or column the value sits in. A unit written elsewhere in the text does not carry over. Neither does regional convention ("Australian NOTAMs are metric"). A value whose unit is not stated is recorded as `null`, and the labeler notes it. If every declared distance for a direction is unitless, `declaredDistances` is `null`.
+**Units.** Units are recorded as written and never converted. A value's unit comes from the first of these that applies:
+
+1. **The value itself** (`1665M`, `10810FT`), or the header of the table or column it sits in.
+2. **A format that defines its unit**: the FAA `OBST` height format and SNOWTAM coverage and depth (see those sections).
+3. **Unitless declared distances**: the unit the same NOTAM uses for the runway's length and threshold displacement. That means its runway, available or closed lengths (`AVBL LEN 990M`, `RWY LENGTH TO READ: 3875FT`) and its displacement (`DTHR 210M`, `DISPLACED BY 1500FT`). If those lengths use different units, or the NOTAM states none, the declared distances have no unit.
+4. **Unitless heights and elevations in a US NOTAM**: if the NOTAM states no unit for any height, elevation or altitude, they are feet. A US NOTAM is one whose location is a US identifier: ICAO codes beginning `K`, `PA`, `PH`, `PG`, `PW` or `TJ`, or an FAA domestic identifier such as `BZN` or `64S`.
+
+No other convention supplies a unit ("Australian NOTAMs are metric" does not). A value with no unit is recorded as `null`, and the labeler notes it. If no declared distance for a direction has a unit, `declaredDistances` is `null`.
 
 Every value is greater than zero.
 
@@ -124,8 +131,8 @@ Remarks such as `RWYCC DOWNGRADED`, friction coefficients (`CRFI`, `MEASURED FRI
 
 | Field | Type | Rule |
 |---|---|---|
-| `heightAGL` | Length? | Height above ground, stated as AGL. |
-| `heightMSL` | Length? | Elevation above sea level, stated as MSL or AMSL. In the FAA `OBST` format `<n>FT (<n>FT AGL)`, the first height is MSL by that format's definition. `UNKNOWN` is `null`. |
+| `heightAGL` | Length? | Height above ground: a height stated as `AGL`, or labelled `HEIGHT`/`HGT` without `AMSL`/`MSL`. |
+| `heightMSL` | Length? | Elevation above sea level: a height stated as `MSL` or `AMSL`, or labelled `ELEVATION`/`ELEV`. In the FAA `OBST` format `<n>FT (<n>FT AGL)`, the first height is MSL by that format's definition. `UNKNOWN` is `null`. |
 | `distance` | Distance? | The stated distance from the reference. |
 | `distanceReference` | string? | What the distance is measured from, as stated (`APCH END RWY 03L`, `ARP`, `JFK`, `TORA RWY 18C`). |
 | `bearingDegrees` | number? | A numeric bearing, when stated (`270 DEG`). Compass words (`WNW`) are not converted; they record `null`. |
@@ -151,6 +158,7 @@ Everything else gets `effects: []`.
 | ILS, localizer, glideslope, VOR, DME, GPS or other navaid outages | `[]` |
 | Taxiway or apron closures, and taxiway or apron FICONs (`TWY … FICON`, `APRON … FICON`) | `[]` |
 | Procedure minima, SID/STAR/IAP changes, circling restrictions | `[]` |
+| An obstacle named in an instrument approach procedure (IAP) or minima NOTAM (`IAP … TEMPORARY CRANE 809 MSL 1.36NM NW OF RWY 31`) | not recorded: approach obstacles are not takeoff obstacles; `[]` unless something else qualifies |
 | Aerodrome or service hours, ATC, fuel, customs | `[]` |
 | Airspace, UAS/drone operations, parachuting, military activity | `[]` |
 | Obstacle **lights** unserviceable (`OBST LGT U/S`) | `[]` |
@@ -358,7 +366,7 @@ Three effects. The closure is stated for the pair, so it goes on the pair's effe
 }
 ```
 
-### Displaced threshold with unitless declared distances
+### Unitless declared distances take the runway-length unit
 
 ```text
 Location: AYKI
@@ -374,7 +382,7 @@ RMK:
 4. ACCESS TO EXISTING APN VIA TWY A AND B.
 ```
 
-The declared-distance table gives no unit, and the "M" on other figures elsewhere in the text does not carry over to it, so declaredDistances is null. "AVBL LEN" is not a declared distance.
+The declared-distance table gives no unit, so it takes the unit this NOTAM uses for runway length and displacement (DTHR 210M, AVBL LEN 990M): metres. The table's columns are TORA, ASDA, TODA, LDA, in that order. AVBL LEN is not itself a declared distance.
 
 ```json
 {
@@ -389,7 +397,51 @@ The declared-distance table gives no unit, and the "M" on other figures elsewher
         "value": 210,
         "unit": "m"
       },
-      "declaredDistances": null,
+      "declaredDistances": {
+        "TORA": {
+          "value": 1090,
+          "unit": "m"
+        },
+        "TODA": {
+          "value": 1150,
+          "unit": "m"
+        },
+        "ASDA": {
+          "value": 1090,
+          "unit": "m"
+        },
+        "LDA": {
+          "value": 990,
+          "unit": "m"
+        }
+      },
+      "surfaceCondition": null,
+      "obstacle": null
+    },
+    {
+      "runway": "25",
+      "closure": "none",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": {
+        "TORA": {
+          "value": 1090,
+          "unit": "m"
+        },
+        "TODA": {
+          "value": 1090,
+          "unit": "m"
+        },
+        "ASDA": {
+          "value": 1090,
+          "unit": "m"
+        },
+        "LDA": {
+          "value": 990,
+          "unit": "m"
+        }
+      },
       "surfaceCondition": null,
       "obstacle": null
     }
@@ -900,7 +952,13 @@ Each runway line is one effect, and SNOWTAM contaminants are always per third. D
 ```text
 Location: BGQQ
 
-SWBG0221 BGQQ 09241032 (SNOWTAM 0221 BGQQ 09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW/DRY SNOW  RWY 16 MEASURED FRICTION COEFFICIENTS 68/69/69 TAP. REMARK/ RWY 16  TAKEOFF SIGNIFICANT CONTAMINANT THIN RWYCC 5/5/5.)
+SWBG0221 BGQQ 09241032
+ (SNOWTAM 0221
+ BGQQ
+ 09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW/DRY SNOW
+ 
+ RWY 16 MEASURED FRICTION COEFFICIENTS 68/69/69 TAP. REMARK/ RWY 16 
+ TAKEOFF SIGNIFICANT CONTAMINANT THIN RWYCC 5/5/5.)
 ```
 
 The SNOWTAM format defines depth in millimetres. Friction coefficients are not recorded.
@@ -1211,6 +1269,77 @@ EXTD RCL, 138FT AMSL, MARKED AND LGTD.
       }
     }
   ]
+}
+```
+
+### Obstacle given as height and elevation
+
+```text
+Location: LFST
+
+TOWER CRANE OPR AT 'ENTZHEIM' :
+RDL 114/0.62NM ARP LFST 
+PSN : 483215N 0073855E
+HEIGHT : 92FT
+ELEV : 572FT
+LIGHTING : NONE
+```
+
+HEIGHT is above ground and ELEV is above sea level. RDL 114 is a numeric bearing from the ARP.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": null,
+      "closure": "none",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null,
+      "obstacle": {
+        "heightAGL": {
+          "value": 92,
+          "unit": "ft"
+        },
+        "heightMSL": {
+          "value": 572,
+          "unit": "ft"
+        },
+        "distance": {
+          "value": 0.62,
+          "unit": "nm"
+        },
+        "distanceReference": "ARP LFST",
+        "bearingDegrees": 114,
+        "latitude": 48.5375,
+        "longitude": 7.648611
+      }
+    }
+  ]
+}
+```
+
+### Obstacle in approach minima
+
+```text
+Location: KLNC
+
+IAP LANCASTER RGNL, LANCASTER, TX.
+RNAV (GPS) RWY 31, AMDT 1B...
+CIRCLING CAT A/B MDA 1160/HAA 659.
+TEMPORARY CRANE, 809 MSL, 1.36NM NW OF RWY 31 (2026-ASW-5819-OE).
+2609031115-2712031115EST
+```
+
+An obstacle named in an approach-procedure NOTAM is not a takeoff obstacle, so it is not recorded, and the minima change is out of scope.
+
+```json
+{
+  "isCanceled": false,
+  "effects": []
 }
 ```
 

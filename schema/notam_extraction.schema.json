@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/SF50-TOLD/Model-Training/blob/main/schema/notam_extraction.schema.json",
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "title": "NOTAMExtraction",
   "description": "Runway-performance facts stated in one NOTAM. Records only what the text states; absent facts are null. See SCHEMA.md for the rules.",
   "type": "object",
