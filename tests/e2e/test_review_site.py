@@ -208,7 +208,7 @@ def test_building_a_closure_and_declared_distances_from_scratch(review, gold_db)
     review.field("Closed length", card).get_by_label("Stated").check()
     card.get_by_role("spinbutton", name="Closed length").fill("500")
     card.get_by_role("combobox", name="Closed length unit").select_option("m")
-    card.get_by_role("textbox", name="Closed end").fill("n")
+    card.get_by_role("combobox", name="Closed end").select_option(label="N")
     review.field("Threshold displacement", card).get_by_label("Stated").check()
     card.get_by_role("spinbutton", name="Threshold displacement").fill("200")
     card.get_by_label("Declared distances").check()
@@ -380,3 +380,28 @@ def test_filters_survive_a_reload(review):
 def test_a_link_opens_a_particular_notam(review):
     review.page.goto(f"{review.url}/?key={JNU}")
     review.expect_on(JNU)
+
+
+def test_closed_end_offers_relative_ends_compass_points_and_runway_ends(review, gold_db):
+    review.go_to(DTW)
+    closed_end = review.page.get_by_role("combobox", name="Closed end")
+    expect(closed_end).to_have_value("W")
+    closed_end.select_option(label="Departure end (LAST)")
+    expect(review.field("Closed end").locator(".problem")).to_have_text(
+        "departureEnd requires a single-direction runway"
+    )
+    closed_end.select_option(label="Runway end…")
+    review.page.get_by_role("textbox", name="Closed runway end").fill("27l")
+    review.leave_field()
+    review.press("s")
+    expect(review.message).to_have_text(f"Saved {DTW} as edited.")
+    assert gold_db.reviews(DTW)[-1]["extraction"]["effects"][0]["closedEnd"] == "27L"
+
+
+def test_an_unfinished_runway_end_saves_as_not_stated(review, gold_db):
+    review.go_to(DTW)
+    review.page.get_by_role("combobox", name="Closed end").select_option(label="Runway end…")
+    review.leave_field()
+    review.press("s")
+    expect(review.message).to_have_text(f"Saved {DTW} as edited.")
+    assert gold_db.reviews(DTW)[-1]["extraction"]["effects"][0]["closedEnd"] is None

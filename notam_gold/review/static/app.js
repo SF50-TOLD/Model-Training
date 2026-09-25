@@ -32,6 +32,16 @@ async function api(path, options = {}) {
 
 const FILTERS_KEY = "notam-review-filters";
 
+const COMPASS_POINTS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+const RELATIVE_ENDS = ["thresholdEnd", "departureEnd"];
+
+/** Blank runway-end entries become null, so an unfinished "Runway end…" never saves as "". */
+function cleaned(form) {
+  const copied = copy(form);
+  for (const effect of copied.effects) if (effect.closedEnd === "") effect.closedEnd = null;
+  return copied;
+}
+
 /** The reviewer's last filters, surviving reloads; empty when storage is unavailable. */
 function savedFilters() {
   try {
@@ -103,6 +113,13 @@ document.addEventListener("alpine:init", () => {
     queue: [],
     index: 0,
     filters: { stratum: "", half: "", status: "all", disagreement: false },
+    closedEndChoices: [
+      { value: "", label: "Not stated" },
+      { value: "thresholdEnd", label: "Threshold end (FIRST)" },
+      { value: "departureEnd", label: "Departure end (LAST)" },
+      ...COMPASS_POINTS.map((point) => ({ value: point, label: point })),
+      { value: "runway", label: "Runway end…" },
+    ],
     progress: [],
     enums: { closure: [], contaminant: [] },
     current: null,
@@ -180,6 +197,16 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
+    /** The dropdown choice for a stored closedEnd: its own value, or "runway" for a runway designator. */
+    closedEndChoice(value) {
+      if (value === null) return "";
+      return [...RELATIVE_ENDS, ...COMPASS_POINTS].includes(value) ? value : "runway";
+    },
+    chooseClosedEnd(effect, choice) {
+      effect.closedEnd = { "": null, runway: "" }[choice] ?? choice;
+      this.changed();
+    },
+
     isStale(notam = this.current) {
       return (notam?.staleDifferences.length ?? 0) > 0;
     },
@@ -201,7 +228,7 @@ document.addEventListener("alpine:init", () => {
     async validate() {
       const { problems } = await api("/api/validate", {
         method: "POST",
-        body: JSON.stringify({ extraction: this.form }),
+        body: JSON.stringify({ extraction: cleaned(this.form) }),
       });
       this.problems = problems;
     },
@@ -346,13 +373,13 @@ document.addEventListener("alpine:init", () => {
       }
     },
     accept() {
-      return this.submit("accepted", this.form);
+      return this.submit("accepted", cleaned(this.form));
     },
     save() {
-      return this.submit("edited", this.form);
+      return this.submit("edited", cleaned(this.form));
     },
     mark(status) {
-      return this.submit(status, this.form);
+      return this.submit(status, cleaned(this.form));
     },
 
     onKey(event) {

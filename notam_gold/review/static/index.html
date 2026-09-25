@@ -160,12 +160,20 @@
               <small class="flag" x-show="flagged(`effects[${e}].closedLength`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].closedLength`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].closedLength`)">Use run B</button></small>
               <small class="problem" x-text="problemAt(`effects[${e}].closedLength`) || problemAt(`effects[${e}].closedLength.value`)"></small>
             </div>
-            <label class="field" :class="{ disagree: flagged(`effects[${e}].closedEnd`) }" @focusin="hoverPath = `effects[${e}].closedEnd`">
+            <div class="field" :class="{ disagree: flagged(`effects[${e}].closedEnd`) }" @focusin="hoverPath = `effects[${e}].closedEnd`">
               <span>Closed end</span>
-              <input type="text" placeholder="not stated" :value="effect.closedEnd ?? ''" @input="effect.closedEnd = $event.target.value.trim().toUpperCase() || null">
+              <div class="inline">
+                <select aria-label="Closed end" @change="chooseClosedEnd(effect, $event.target.value)">
+                  <template x-for="choice in closedEndChoices" :key="choice.value">
+                    <option :value="choice.value" x-text="choice.label" :selected="closedEndChoice(effect.closedEnd) === choice.value"></option>
+                  </template>
+                </select>
+                <input type="text" aria-label="Closed runway end" placeholder="27L" x-show="closedEndChoice(effect.closedEnd) === 'runway'"
+                       :value="effect.closedEnd ?? ''" @input="effect.closedEnd = $event.target.value.trim().toUpperCase()">
+              </div>
               <small class="flag" x-show="flagged(`effects[${e}].closedEnd`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].closedEnd`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].closedEnd`)">Use run B</button></small>
               <small class="problem" x-text="problemAt(`effects[${e}].closedEnd`)"></small>
-            </label>
+            </div>
           </div>
 
           <div class="field measure" :class="{ disagree: flagged(`effects[${e}].thresholdDisplacement`) }" @focusin="hoverPath = `effects[${e}].thresholdDisplacement`">
