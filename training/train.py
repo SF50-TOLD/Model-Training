@@ -8,9 +8,12 @@ saved as a Hugging Face–layout folder (safetensors, config, tokenizer) for con
 
 Every weight trains by default. ``--lora-rank`` trains low-rank adapters on every linear layer instead,
 for a base too large to fine-tune whole in the Mac's memory, and saves them fused into the weights.
+``--checkpoint-layers`` recomputes each block's activations in the backward pass instead of keeping them,
+which a 4B base needs to fit.
 
     python -m training.train --out data/models/qwen3-0.6b-notam
-    python -m training.train --base Qwen/Qwen3-4B --lora-rank 32 --learning-rate 2e-4 --out data/models/qwen3-4b-notam
+    python -m training.train --base Qwen/Qwen3-4B --lora-rank 32 --learning-rate 2e-4 --checkpoint-layers \
+        --out data/models/qwen3-4b-notam
 """
 
 import argparse
@@ -28,6 +31,7 @@ from mlx import nn
 from mlx.utils import tree_flatten
 from mlx_lm import load
 from mlx_lm.tuner.lora import LoRALinear
+from mlx_lm.tuner.trainer import grad_checkpoint
 from mlx_lm.tuner.utils import linear_to_lora_layers
 
 from training import reading_format
@@ -125,6 +129,7 @@ def main():
     parser.add_argument("--seed", type=int, default=2027)
     parser.add_argument("--lora-rank", type=int, default=0, help="train adapters of this rank; 0 trains every weight")
     parser.add_argument("--lora-scale", type=float, default=2.0)
+    parser.add_argument("--checkpoint-layers", action="store_true", help="trade compute for activation memory")
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
@@ -133,6 +138,8 @@ def main():
     model, tokenizer = load(str(base))
     if args.lora_rank:
         add_adapters(model, args.lora_rank, args.lora_scale)
+    if args.checkpoint_layers:
+        grad_checkpoint(model.layers[0])
     train = examples(args.data / "train.jsonl", tokenizer)
     val = examples(args.data / "val.jsonl", tokenizer)
     steps_per_epoch = sum(1 for _ in batches(train, args.tokens_per_batch, False, rng))
@@ -156,9 +163,10 @@ def main():
         model.train()
         for batch in batches(train, args.tokens_per_batch, True, rng):
             loss, grads = step_loss_and_grad(model, *batch)
+            mx.eval(loss, grads)  # in one graph with the update, checkpointed layers keep every activation
             grads, _ = optim.clip_grad_norm(grads, 1.0)
             optimizer.update(model, grads)
-            mx.eval(model.parameters(), optimizer.state, loss)
+            mx.eval(model.parameters(), optimizer.state)
             step += 1
             if step % 25 == 0:
                 print(f"  step {step}/{total}: loss {loss.item():.4f} ({time.perf_counter() - started:.0f}s)")
