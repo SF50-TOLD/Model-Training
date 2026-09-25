@@ -10,7 +10,8 @@ on all of them, and none shares a reissue template or text with a gold NOTAM). E
 validate against the schema. The completion is the canonical extraction as compact JSON with keys in
 schema order — exactly the text the on-device decoder emits.
 
-Validation is carved from training by reissue template, never from the gold set:
+Labels then follow the conventions both runs get wrong alike (label_rules.py). Validation is carved
+from training by reissue template, never from the gold set:
 **nothing from notam_dev or notam_test is ever written here.** Training NOTAMs in the scarce numeric
 strata also get label-preserving variants (augment.py); validation gets none.
 
@@ -31,6 +32,7 @@ from notam_gold.paths import DATABASE, EVAL_DIR
 from notam_gold.prompt import build_prompt
 from notam_gold.schema import canonicalize, validate
 from training.augment import variants
+from training.label_rules import corrected
 from training.paths import DATASET_DIR, TRAINING_DATABASE
 from training.select_training import DUAL_RUN_QUOTAS, normalized_text
 
@@ -180,6 +182,7 @@ def main():
         for notam, label in examples:
             if notam["id"] in gold:
                 raise SystemExit(f"{notam['id']} is gold; refusing to write it to a training set")
+            label = corrected(label, notam["notam_text"])
             if validate(label):
                 skipped["invalid"] += 1
                 continue
