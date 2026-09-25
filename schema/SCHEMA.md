@@ -1,6 +1,6 @@
 # NOTAM extraction schema
 
-This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.1.0). The same contract is used in three places:
+This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.2.0). The same contract is used in three places:
 
 - the silver labeler's instructions;
 - the human review tool;
@@ -66,6 +66,8 @@ Every value is greater than zero.
 ## `DeclaredDistances`
 
 `TORA`, `TODA`, `ASDA`, `LDA`: each a `Length?`. Record the distances that are stated and leave the rest `null`; never copy one distance into another. A dash or `NIL` in a declared-distance table is `null`. Parenthesised gradients (`2232(2.37)`) are not recorded.
+
+Declared distances that name no runway belong to the only runway direction the NOTAM names (`THR RWY 27 DISPLACED 200M … DECLARED DISTANCES CHANGED: TORA: 690M.` → runway `27`). If the NOTAM names more than one runway, or names only a pair (`RWY 09/27`), they have no direction, so they aren't recorded and the labeler notes it.
 
 ## `SurfaceCondition`
 
@@ -439,6 +441,51 @@ The declared-distance table gives no unit, so it takes the unit this NOTAM uses 
         },
         "LDA": {
           "value": 990,
+          "unit": "m"
+        }
+      },
+      "surfaceCondition": null,
+      "obstacle": null
+    }
+  ]
+}
+```
+
+### Declared distances that name no runway
+
+```text
+Location: EDGQ
+
+THR RWY 27 DISPLACED 200M INWARDS. 
+DECLARED DISTANCES CHANGED:
+TORA: 690M.
+LDA: 690M.
+```
+
+The declared distances name no runway, so they belong to RWY 27, the only runway the NOTAM names.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "27",
+      "closure": "none",
+      "closedLength": null,
+      "closedEnd": null,
+      "thresholdDisplacement": {
+        "value": 200,
+        "unit": "m"
+      },
+      "declaredDistances": {
+        "TORA": {
+          "value": 690,
+          "unit": "m"
+        },
+        "TODA": null,
+        "ASDA": null,
+        "LDA": {
+          "value": 690,
           "unit": "m"
         }
       },
@@ -952,13 +999,7 @@ Each runway line is one effect, and SNOWTAM contaminants are always per third. D
 ```text
 Location: BGQQ
 
-SWBG0221 BGQQ 09241032
- (SNOWTAM 0221
- BGQQ
- 09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW/DRY SNOW
- 
- RWY 16 MEASURED FRICTION COEFFICIENTS 68/69/69 TAP. REMARK/ RWY 16 
- TAKEOFF SIGNIFICANT CONTAMINANT THIN RWYCC 5/5/5.)
+SWBG0221 BGQQ 09241032 (SNOWTAM 0221 BGQQ 09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW/DRY SNOW  RWY 16 MEASURED FRICTION COEFFICIENTS 68/69/69 TAP. REMARK/ RWY 16  TAKEOFF SIGNIFICANT CONTAMINANT THIN RWYCC 5/5/5.)
 ```
 
 The SNOWTAM format defines depth in millimetres. Friction coefficients are not recorded.

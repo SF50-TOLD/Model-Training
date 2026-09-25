@@ -6,10 +6,12 @@ model, prompt version and schema version. Results are stored in
 """
 
 import hashlib
+import itertools
 import json
 import random
 import re
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import cache
 
@@ -183,20 +185,75 @@ def submit(
     ]
     batch = client.messages.batches.create(requests=requests)
     with connection:
-        cursor = connection.execute(
-            "INSERT INTO label_run (name, model, prompt_version, schema_version, batch_id, notam_keys, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                spec.name,
-                spec.model,
-                spec.prompt_version,
-                schema_version(),
-                batch.id,
-                db.dumps([n["id"] for n in notams]),
-                db.now(),
-            ),
-        )
-    return cursor.lastrowid
+        return _record_run(connection, spec, notams, batch.id)
+
+
+def _record_run(connection: sqlite3.Connection, spec: RunSpec, notams: list[sqlite3.Row], batch_id: str | None) -> int:
+    keys = db.dumps([n["id"] for n in notams])
+    return connection.execute(
+        "INSERT INTO label_run (name, model, prompt_version, schema_version, batch_id, notam_keys, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (spec.name, spec.model, spec.prompt_version, schema_version(), batch_id, keys, db.now()),
+    ).lastrowid
+
+
+def label_now(
+    client: anthropic.Anthropic,
+    connection: sqlite3.Connection,
+    spec: RunSpec,
+    notams: list[sqlite3.Row],
+    workers: int = 4,
+) -> dict[str, int]:
+    """Label ``notams`` through the Messages API, at standard prices, and record the run.
+
+    Worth it for small sets: after the first request writes the prompt cache, the rest read it
+    reliably, whereas concurrent batch requests can each miss and pay for a cache write.
+    """
+    with connection:
+        run_id = _record_run(connection, spec, notams, batch_id=None)
+
+    def label(notam):
+        try:
+            prompt = build_prompt(notam["icao_location"], notam["notam_text"])
+            return client.messages.create(**request_params(spec, prompt))
+        except anthropic.APIError as error:
+            return error
+
+    counts = {"succeeded": 0, "errored": 0}
+    try:
+        with ThreadPoolExecutor(workers) as pool:
+            results = itertools.chain([label(notams[0])], pool.map(label, notams[1:])) if notams else []
+            for notam, result in zip(notams, results, strict=True):
+                if isinstance(result, anthropic.APIError):
+                    counts["errored"] += 1
+                    continue
+                with connection:
+                    _store(connection, run_id, notam, result)
+                counts["succeeded"] += 1
+    finally:
+        with connection:
+            connection.execute("UPDATE label_run SET ended_at = ? WHERE id = ?", (db.now(), run_id))
+    return counts
+
+
+def _store(connection: sqlite3.Connection, run_id: int, notam: sqlite3.Row, message) -> None:
+    fields = parse_result(message, notam["notam_text"])
+    connection.execute(
+        "INSERT OR IGNORE INTO silver_label"
+        " (run_id, notam_key, extraction, evidence, note, problems, response, usage, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            run_id,
+            notam["id"],
+            db.dumps(fields["extraction"]),
+            db.dumps(fields["evidence"]),
+            fields["note"],
+            db.dumps(fields["problems"]),
+            message.to_json(),
+            message.usage.to_json(),
+            db.now(),
+        ),
+    )
 
 
 def _squashed(text: str) -> str:
@@ -213,7 +270,7 @@ def evidence_problems(evidence: list[dict], text: str) -> list[dict]:
 
 
 def parse_result(message, notam_text: str) -> dict:
-    """Silver fields from one successful batch message, with every problem recorded rather than raised."""
+    """Silver fields from one successful message, with every problem recorded rather than raised."""
     if message.stop_reason != "end_turn":
         return {
             "extraction": None,
@@ -244,31 +301,13 @@ def ingest(client: anthropic.Anthropic, connection: sqlite3.Connection, run_id: 
             counts[kind] = counts.get(kind, 0) + 1
             if kind != "succeeded":
                 continue
-            notam = notams[result.custom_id]
-            message = result.result.message
-            fields = parse_result(message, notam["notam_text"])
-            connection.execute(
-                "INSERT OR IGNORE INTO silver_label"
-                " (run_id, notam_key, extraction, evidence, note, problems, response, usage, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    run_id,
-                    notam["id"],
-                    db.dumps(fields["extraction"]),
-                    db.dumps(fields["evidence"]),
-                    fields["note"],
-                    db.dumps(fields["problems"]),
-                    message.to_json(),
-                    message.usage.to_json(),
-                    db.now(),
-                ),
-            )
+            _store(connection, run_id, notams[result.custom_id], result.result.message)
         connection.execute("UPDATE label_run SET ended_at = ? WHERE id = ?", (db.now(), run_id))
     return counts
 
 
 def actual_cost(connection: sqlite3.Connection) -> dict[str, float]:
-    """Spend so far per run, from recorded usage."""
+    """Spend so far per run, from recorded usage; requests outside a batch cost twice the batch rate."""
     costs: dict[str, float] = {}
     rows = connection.execute(
         "SELECT label_run.id, label_run.name, label_run.model, silver_label.usage"
@@ -276,7 +315,8 @@ def actual_cost(connection: sqlite3.Connection) -> dict[str, float]:
     )
     for row in rows:
         usage = json.loads(row["usage"])
-        prices = BATCH_PRICES[row["model"]]
+        rate = 1 if usage.get("service_tier") == "batch" else 2
+        prices = {kind: price * rate for kind, price in BATCH_PRICES[row["model"]].items()}
         cost = (
             usage.get("input_tokens", 0) * prices["input"]
             + usage.get("output_tokens", 0) * prices["output"]

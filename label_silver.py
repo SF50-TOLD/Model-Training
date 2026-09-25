@@ -4,6 +4,7 @@
     label_silver.py estimate A            # projected cost of labelling every candidate in run A
     label_silver.py submit A --pilot 20   # small pilot batch
     label_silver.py submit A              # every candidate without a run-A label
+    label_silver.py run A --keys FILE     # label the listed NOTAMs now, outside a batch
     label_silver.py status                # runs and their batch status
     label_silver.py ingest 3              # store a finished batch's results
     label_silver.py disagreements         # compare the latest run-A and run-B labels
@@ -14,6 +15,7 @@ Batches over the cost limit need --confirm-cost.
 
 import argparse
 import sqlite3
+from pathlib import Path
 
 import anthropic
 from dotenv import load_dotenv
@@ -63,17 +65,36 @@ def print_estimate(spec: labeling.RunSpec, estimate: dict):
     print(f"Estimated batch cost: ${estimate['best_usd']:.2f} (cache hits) to ${estimate['worst_usd']:.2f} (no hits)")
 
 
+def chosen(connection: sqlite3.Connection, spec: labeling.RunSpec, args) -> list[sqlite3.Row]:
+    """The unlabelled candidates, narrowed to --keys and --pilot when given."""
+    notams = unlabelled(connection, spec)
+    if args.keys:
+        wanted = set(args.keys.read_text(encoding="utf-8").split("\n")) - {""}
+        notams = [n for n in notams if n["id"] in wanted]
+    return notams[: args.pilot] if args.pilot else notams
+
+
 def command_estimate(client, connection, args):
     spec = labeling.RUNS[args.run]
-    notams = unlabelled(connection, spec)[: args.pilot] if args.pilot else unlabelled(connection, spec)
-    print_estimate(spec, cost_estimate(client, connection, spec, notams))
+    print_estimate(spec, cost_estimate(client, connection, spec, chosen(connection, spec, args)))
+
+
+def command_run(client, connection, args):
+    spec = labeling.RUNS[args.run]
+    notams = chosen(connection, spec, args)
+    if not notams:
+        raise SystemExit(f"Every chosen candidate already has a run-{spec.name} label.")
+    estimate = cost_estimate(client, connection, spec, notams)
+    expected = 2 * estimate["best_usd"]
+    print(f"Run {spec.name}: {len(notams)} requests at standard prices, about ${expected:.2f} with the cache warm")
+    if expected > COST_LIMIT_USD and not args.confirm_cost:
+        raise SystemExit(f"Estimate exceeds ${COST_LIMIT_USD}; re-run with --confirm-cost once approved.")
+    print(labeling.label_now(client, connection, spec, notams))
 
 
 def command_submit(client, connection, args):
     spec = labeling.RUNS[args.run]
-    notams = unlabelled(connection, spec)
-    if args.pilot:
-        notams = notams[: args.pilot]
+    notams = chosen(connection, spec, args)
     if not notams:
         raise SystemExit(f"Every candidate already has a run-{spec.name} label.")
     estimate = cost_estimate(client, connection, spec, notams)
@@ -87,9 +108,14 @@ def command_submit(client, connection, args):
 
 def command_status(client, connection, _args):
     for run in connection.execute("SELECT * FROM label_run ORDER BY id"):
+        stored = connection.execute("SELECT COUNT(*) FROM silver_label WHERE run_id = ?", (run["id"],)).fetchone()[0]
+        if run["batch_id"] is None:
+            state = "ended" if run["ended_at"] else "running"
+            label = f"run {run['id']} {run['name']} {run['model']} prompt {run['prompt_version']}"
+            print(f"{label}: synchronous, {state}; stored {stored}")
+            continue
         batch = client.messages.batches.retrieve(run["batch_id"])
         counts = batch.request_counts
-        stored = connection.execute("SELECT COUNT(*) FROM silver_label WHERE run_id = ?", (run["id"],)).fetchone()[0]
         print(
             f"run {run['id']} {run['name']} {run['model']} prompt {run['prompt_version']}: {batch.processing_status};"
             f" succeeded {counts.succeeded}, errored {counts.errored}, expired {counts.expired}; stored {stored}"
@@ -137,10 +163,11 @@ def command_cost(_client, connection, _args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("estimate", "submit"):
+    for name in ("estimate", "submit", "run"):
         command = commands.add_parser(name)
         command.add_argument("run", choices=labeling.RUNS)
         command.add_argument("--pilot", type=int, help="only the first N unlabelled candidates")
+        command.add_argument("--keys", type=Path, help="only the NOTAM keys listed one per line in this file")
         command.add_argument("--confirm-cost", action="store_true")
     commands.add_parser("status")
     commands.add_parser("ingest").add_argument("run_id", type=int)
