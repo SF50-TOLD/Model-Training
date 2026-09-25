@@ -94,6 +94,14 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
     """
     connection = db.connect(database)
     app = FastAPI(title="NOTAM gold review")
+
+    @app.middleware("http")
+    async def revalidate(request, call_next):
+        """Make browsers revalidate every load, so an edited page never runs a stale cached script."""
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/")

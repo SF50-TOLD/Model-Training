@@ -35,3 +35,8 @@ def test_rejects_invalid_labels_but_keeps_ambiguous_ones(client):
     assert response.status_code == 422
     assert response.json()["detail"]["problems"][0]["path"] == "effects[0]"
     assert review(client, "ambiguous", invalid, note="Can't tell").json()["status"] == "ambiguous"
+
+
+def test_pages_and_scripts_are_revalidated_on_every_load(client):
+    for path in ("/", "/static/app.js", "/api/progress"):
+        assert client.get(path).headers["cache-control"] == "no-cache"
