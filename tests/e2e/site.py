@@ -13,8 +13,15 @@ MSN = "KMSN A6/2026"
 LIRR = "LIRR A7/2026"
 ORD = "KORD A8/2026"
 
-# The queue's default order: unreviewed first, highest disagreement score first, then selection rank.
-QUEUE = [LIRR, DTW, BZN, SFO, JNU, TPA, MSN, ORD]
+# The queue's order: the re-review (ORD); the dev half (SFO, LIRR); then the test half, one stratum
+# at a time in stratum order. The halves come from each key's hash (see notam_gold.export.split_of).
+QUEUE = [ORD, SFO, LIRR, BZN, DTW, JNU, TPA, MSN]
+
+
+def after(key: str) -> str:
+    """The NOTAM the queue moves to after saving ``key``."""
+    return QUEUE[QUEUE.index(key) + 1]
+
 
 SFO_LABEL = extraction(
     effect("28L", declaredDistances=declared(length(10810), length(10810), length(10981), length(10275)))

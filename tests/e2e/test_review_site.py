@@ -2,13 +2,16 @@
 
 from playwright.sync_api import expect
 
-from tests.e2e.site import BZN, DTW, JNU, LIRR, MSN, ORD, ORD_NEW_RULES, QUEUE, SFO, SFO_LABEL, TPA
+from tests.e2e.site import BZN, DTW, JNU, LIRR, MSN, ORD, ORD_NEW_RULES, QUEUE, SFO, SFO_LABEL, TPA, after
 from tests.factories import contaminant, declared, effect, extraction, length, obstacle, surface
 
 
-def test_opens_on_the_biggest_disagreement(review):
-    review.expect_on(LIRR)
+def test_opens_on_re_reviews_then_the_dev_half_one_stratum_at_a_time(review):
+    review.expect_on(ORD)
     expect(review.counter).to_have_text(f"1 of {len(QUEUE)}")
+    review.press("j")
+    review.expect_on(SFO)
+    expect(review.page.get_by_text("Dev half")).to_be_visible()
     expect(review.page.locator(".progress li")).to_have_count(7)
     expect(review.progress("Obstacle")).to_have_text("0/1")
 
@@ -35,7 +38,7 @@ def test_focusing_a_field_highlights_its_evidence(review):
 def test_accepting_saves_the_silver_label_and_advances(review, gold_db):
     review.go_to(SFO)
     review.press("a")
-    review.expect_on(JNU)
+    review.expect_on(after(SFO))
     expect(review.message).to_have_text(f"Saved {SFO} as accepted.")
     expect(review.progress("Declared distances")).to_have_text("1/2")
     [saved] = gold_db.reviews(SFO)
@@ -47,7 +50,7 @@ def test_editing_a_value_then_saving_records_an_edit(review, gold_db):
     review.go_to(SFO)
     review.page.get_by_role("spinbutton", name="TORA").fill("10800")
     review.press("Meta+Enter")
-    review.expect_on(JNU)
+    review.expect_on(after(SFO))
     [saved] = gold_db.reviews(SFO)
     assert (saved["status"], saved["edited"]) == ("edited", 1)
     assert saved["extraction"]["effects"][0]["declaredDistances"]["TORA"] == length(10800)
@@ -56,7 +59,7 @@ def test_editing_a_value_then_saving_records_an_edit(review, gold_db):
 def test_save_key_without_changes_counts_as_accepted(review, gold_db):
     review.go_to(SFO)
     review.press("s")
-    review.expect_on(JNU)
+    review.expect_on(after(SFO))
     assert gold_db.reviews(SFO)[0]["status"] == "accepted"
 
 
@@ -78,7 +81,7 @@ def test_marking_ambiguous_keeps_the_note(review, gold_db):
     review.page.keyboard.type("Table is unclear")
     review.leave_field()
     review.press("m")
-    review.expect_on(JNU)
+    review.expect_on(after(SFO))
     [saved] = gold_db.reviews(SFO)
     assert (saved["status"], saved["note"]) == ("ambiguous", "Table is unclear")
     expect(review.progress("Declared distances")).to_have_text("1/2")
@@ -87,7 +90,7 @@ def test_marking_ambiguous_keeps_the_note(review, gold_db):
 def test_skipping_saves_nothing_toward_progress(review, gold_db):
     review.go_to(SFO)
     review.press("k")
-    review.expect_on(JNU)
+    review.expect_on(after(SFO))
     assert gold_db.reviews(SFO)[0]["status"] == "skipped"
     expect(review.progress("Declared distances")).to_have_text("0/2")
 
@@ -144,7 +147,7 @@ def test_a_reviewed_notam_reopens_with_its_saved_label(review):
     review.page.get_by_role("spinbutton", name="TORA").fill("10800")
     review.leave_field()
     review.press("s")
-    review.expect_on(JNU)
+    review.expect_on(after(SFO))
     review.press("p")
     review.expect_on(SFO)
     expect(review.page.get_by_role("spinbutton", name="TORA")).to_have_value("10800")
@@ -158,7 +161,7 @@ def test_a_field_disagreement_shows_run_b_and_can_take_it(review, gold_db):
     closed_length.get_by_role("button", name="Use run B").click()
     expect(review.page.get_by_role("spinbutton", name="Closed length")).to_have_value("1700")
     review.press("a")
-    review.expect_on(BZN)
+    review.expect_on(after(DTW))
     [saved] = gold_db.reviews(DTW)
     assert saved["status"] == "edited"
     assert saved["extraction"]["effects"][0]["closedLength"] == length(1700)
@@ -170,14 +173,14 @@ def test_an_effect_only_run_b_found_can_be_added(review, gold_db):
     review.page.get_by_role("button", name="Add run B's effect").click()
     expect(review.page.get_by_role("textbox", name="Runway")).to_have_value("29")
     review.press("s")
-    review.expect_on(SFO)
+    review.expect_on(after(BZN))
     assert gold_db.reviews(BZN)[0]["extraction"] == extraction(
         effect("29", declaredDistances=declared(TORA=length(2298)))
     )
 
 
 def test_all_of_run_bs_extra_effects_can_be_added_at_once(review):
-    review.expect_on(LIRR)
+    review.go_to(LIRR)
     review.page.get_by_role("button", name="Add all 2 of run B's extra effects").click()
     expect(review.page.locator("fieldset.effect")).to_have_count(2)
     heights = review.page.get_by_role("spinbutton", name="Height AGL")
@@ -190,7 +193,7 @@ def test_effects_can_be_removed(review, gold_db):
     review.page.get_by_role("button", name="Remove effect 1").click()
     expect(review.page.get_by_text("No effects.")).to_be_visible()
     review.press("s")
-    review.expect_on(JNU)
+    review.expect_on(after(SFO))
     assert gold_db.reviews(SFO)[0]["extraction"] == extraction()
 
 
@@ -244,7 +247,7 @@ def test_editing_a_surface_condition_and_its_contaminants(review, gold_db):
     expect(card.locator(".contaminant")).to_have_count(2)
     review.leave_field()
     review.press("s")
-    review.expect_on(TPA)
+    review.expect_on(after(JNU))
     assert gold_db.reviews(JNU)[0]["extraction"] == extraction(
         effect(
             "08",

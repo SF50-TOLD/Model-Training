@@ -12,8 +12,10 @@ from pydantic import BaseModel
 
 from notam_gold import db
 from notam_gold.coords import parse_position
+from notam_gold.export import split_of
 from notam_gold.labeling import evidence_problems
 from notam_gold.prompt import build_prompt
+from notam_gold.review.queue import review_order
 from notam_gold.reviews import stale_reviews
 from notam_gold.schema import canonicalize, schema, validate
 from notam_gold.strata import ALL_STRATA
@@ -145,10 +147,10 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
                     "stratum": row["selected_stratum"],
                     "score": row["score"],
                     "status": reviewed_status,
+                    "half": split_of(row["key"]),
                 }
             )
-        items.sort(key=lambda item: (item["status"] not in OPEN_STATUSES, -item["score"]))
-        return {"items": items, "reviewer": reviewer}
+        return {"items": review_order(items), "reviewer": reviewer}
 
     @app.get("/api/progress")
     async def progress():
@@ -172,6 +174,7 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
             "prompt": build_prompt(row["icao_location"], row["notam_text"]),
             "strata": db.loads(row["strata"]),
             "stratum": row["selected_stratum"],
+            "half": split_of(key),
             "nmsType": row["nms_type"],
             "effectiveStart": row["effective_start"],
             "effectiveEnd": row["effective_end"],

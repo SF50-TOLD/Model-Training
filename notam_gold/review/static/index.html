@@ -57,6 +57,7 @@
       <template x-for="s in current?.strata || []" :key="s">
         <span class="chip" :class="{ primary: s === current.stratum }" x-text="strataName(s)"></span>
       </template>
+      <span class="chip muted" x-show="current?.half" x-text="current?.half === 'dev' ? 'Dev half' : 'Test half'"></span>
       <span class="chip muted" x-show="current?.nmsType" x-text="'NMS type ' + current?.nmsType"></span>
       <span class="chip warn" x-show="current?.nmsType === 'C' && !textShowsCancel()">Cancelled in metadata only</span>
     </div>
