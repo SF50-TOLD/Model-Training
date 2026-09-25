@@ -27,6 +27,13 @@
         </template>
       </select>
     </label>
+    <label>Half
+      <select x-model="filters.half" @change="reload()">
+        <option value="">Both</option>
+        <option value="dev">Dev half</option>
+        <option value="test">Test half</option>
+      </select>
+    </label>
     <label>Show
       <select x-model="filters.status" @change="reload()">
         <option value="all">All</option>

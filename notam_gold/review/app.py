@@ -125,40 +125,45 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
             "contaminant": definitions["Contaminant"]["properties"]["type"]["enum"],
         }
 
-    @app.get("/api/queue")
-    async def queue(stratum: str | None = None, disagreement: bool = False, status: str = "all"):
-        items = []
+    def all_items() -> list[dict]:
         stale = stale_reviews(connection)
-        for row in connection.execute(QUEUE_SQL):
-            reviewed_status = _queue_status(row, stale)
-            if stratum and row["selected_stratum"] != stratum:
-                continue
-            if disagreement and not row["score"]:
-                continue
-            if status == "reviewed" and reviewed_status not in ("accepted", "edited"):
-                continue
-            if status not in ("all", "reviewed") and reviewed_status != status:
-                continue
-            items.append(
-                {
-                    "key": row["key"],
-                    "notamId": row["notam_id"],
-                    "location": row["icao_location"],
-                    "stratum": row["selected_stratum"],
-                    "score": row["score"],
-                    "status": reviewed_status,
-                    "half": split_of(row["key"]),
-                }
-            )
-        return {"items": review_order(items), "reviewer": reviewer}
+        return [
+            {
+                "key": row["key"],
+                "notamId": row["notam_id"],
+                "location": row["icao_location"],
+                "stratum": row["selected_stratum"],
+                "score": row["score"],
+                "status": _queue_status(row, stale),
+                "half": split_of(row["key"]),
+            }
+            for row in connection.execute(QUEUE_SQL)
+        ]
+
+    def matches(item: dict, stratum: str | None, half: str | None, disagreement: bool, status: str) -> bool:
+        if (stratum and item["stratum"] != stratum) or (half and item["half"] != half):
+            return False
+        if disagreement and not item["score"]:
+            return False
+        if status == "reviewed":
+            return item["status"] in ("accepted", "edited")
+        return status == "all" or item["status"] == status
+
+    @app.get("/api/queue")
+    async def queue(
+        stratum: str | None = None, half: str | None = None, disagreement: bool = False, status: str = "all"
+    ):
+        ordered = review_order(all_items())
+        return {"items": [i for i in ordered if matches(i, stratum, half, disagreement, status)], "reviewer": reviewer}
 
     @app.get("/api/progress")
-    async def progress():
-        stale = stale_reviews(connection)
+    async def progress(half: str | None = None):
         totals, reviewed = Counter(), Counter()
-        for row in connection.execute(QUEUE_SQL):
-            totals[row["selected_stratum"]] += 1
-            reviewed[row["selected_stratum"]] += _queue_status(row, stale) not in (*OPEN_STATUSES, "skipped")
+        for item in all_items():
+            if half and item["half"] != half:
+                continue
+            totals[item["stratum"]] += 1
+            reviewed[item["stratum"]] += item["status"] not in (*OPEN_STATUSES, "skipped")
         return [{"stratum": s, "total": totals[s], "reviewed": reviewed[s]} for s in ALL_STRATA if totals[s]]
 
     @app.get("/api/notam")

@@ -30,6 +30,25 @@ async function api(path, options = {}) {
   return body;
 }
 
+const FILTERS_KEY = "notam-review-filters";
+
+/** The reviewer's last filters, surviving reloads; empty when storage is unavailable. */
+function savedFilters() {
+  try {
+    return JSON.parse(localStorage.getItem(FILTERS_KEY)) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function saveFilters(filters) {
+  try {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
+  } catch {
+    // Private browsing or blocked storage: filters simply reset on reload.
+  }
+}
+
 function emptyExtraction() {
   return { isCanceled: false, effects: [] };
 }
@@ -83,7 +102,7 @@ document.addEventListener("alpine:init", () => {
   Alpine.data("review", () => ({
     queue: [],
     index: 0,
-    filters: { stratum: "", status: "all", disagreement: false },
+    filters: { stratum: "", half: "", status: "all", disagreement: false },
     progress: [],
     enums: { closure: [], contaminant: [] },
     current: null,
@@ -101,26 +120,31 @@ document.addEventListener("alpine:init", () => {
 
     async init() {
       this.enums = await api("/api/enums");
-      await this.refreshProgress();
-      await this.reload();
+      const linked = new URLSearchParams(location.search).get("key");
+      if (!linked) this.filters = { ...this.filters, ...savedFilters() };
+      await this.reload(linked);
     },
 
-    async reload() {
+    /** Reload the queue for the current filters, opening `key` if given, else the first NOTAM. */
+    async reload(key = null) {
+      saveFilters(this.filters);
       const params = new URLSearchParams({
         status: this.filters.status,
         disagreement: this.filters.disagreement,
         ...(this.filters.stratum && { stratum: this.filters.stratum }),
+        ...(this.filters.half && { half: this.filters.half }),
       });
-      const { items } = await api(`/api/queue?${params}`);
+      const [{ items }] = await Promise.all([api(`/api/queue?${params}`), this.refreshProgress()]);
       this.queue = items;
-      this.index = 0;
       this.loaded = true;
-      if (items.length) await this.show(0);
+      const index = Math.max(0, items.findIndex((item) => item.key === key));
+      if (items.length) await this.show(index);
       else this.current = null;
     },
 
     async refreshProgress() {
-      this.progress = await api("/api/progress");
+      const half = this.filters.half ? `?half=${this.filters.half}` : "";
+      this.progress = await api(`/api/progress${half}`);
     },
 
     fetchNotam(key) {
@@ -134,8 +158,13 @@ document.addEventListener("alpine:init", () => {
 
     async show(index) {
       this.index = index;
-      const key = this.queue[index].key;
-      const notam = await this.fetchNotam(key);
+      const { key, status } = this.queue[index];
+      let notam = await this.fetchNotam(key);
+      if (!notam.review && !["unreviewed", "stale"].includes(status)) {
+        // A copy fetched before this NOTAM was saved; never show it in place of the saved review.
+        this.cache.clear();
+        notam = await this.fetchNotam(key);
+      }
       if (this.queue[this.index]?.key !== key) return;
       this.current = notam;
       const silver = notam.silverA?.extraction ?? emptyExtraction();

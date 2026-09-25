@@ -6,12 +6,12 @@ from tests.e2e.site import BZN, DTW, JNU, LIRR, MSN, ORD, ORD_NEW_RULES, QUEUE, 
 from tests.factories import contaminant, declared, effect, extraction, length, obstacle, surface
 
 
-def test_opens_on_re_reviews_then_the_dev_half_one_stratum_at_a_time(review):
+def test_opens_on_re_reviews_then_one_notam_per_stratum(review):
     review.expect_on(ORD)
     expect(review.counter).to_have_text(f"1 of {len(QUEUE)}")
     review.press("j")
     review.expect_on(SFO)
-    expect(review.page.get_by_text("Dev half")).to_be_visible()
+    expect(review.chip("Dev half")).to_be_visible()
     expect(review.page.locator(".progress li")).to_have_count(7)
     expect(review.progress("Obstacle")).to_have_text("0/1")
 
@@ -357,3 +357,26 @@ def test_a_review_overtaken_by_new_rules_comes_back_for_re_review(review, gold_d
     expect(review.progress("Full closure")).to_have_text("1/1")
     review.filter_status("Needs re-review")
     expect(review.page.get_by_text("Nothing matches these filters.")).to_be_visible()
+
+
+def test_filters_to_one_half_with_that_halfs_progress(review):
+    review.filter_half("Test half")
+    expect(review.counter).to_have_text("1 of 6")
+    expect(review.chip("Test half")).to_be_visible()
+    expect(review.progress("Declared distances")).to_have_text("0/1")
+    review.filter_half("Dev half")
+    review.expect_on(SFO)
+    expect(review.counter).to_have_text("1 of 2")
+
+
+def test_filters_survive_a_reload(review):
+    review.filter_half("Test half")
+    review.filter_stratum("Partial closure")
+    review.page.reload()
+    review.expect_on(DTW)
+    expect(review.page.get_by_role("combobox", name="Half")).to_have_value("test")
+
+
+def test_a_link_opens_a_particular_notam(review):
+    review.page.goto(f"{review.url}/?key={JNU}")
+    review.expect_on(JNU)

@@ -13,9 +13,9 @@ MSN = "KMSN A6/2026"
 LIRR = "LIRR A7/2026"
 ORD = "KORD A8/2026"
 
-# The queue's order: the re-review (ORD); the dev half (SFO, LIRR); then the test half, one stratum
-# at a time in stratum order. The halves come from each key's hash (see notam_gold.export.split_of).
-QUEUE = [ORD, SFO, LIRR, BZN, DTW, JNU, TPA, MSN]
+# The queue's order: the re-review (ORD), then one NOTAM per half-and-stratum, in stratum order with
+# the dev half first. SFO and LIRR are dev; the rest are test (see notam_gold.export.split_of).
+QUEUE = [ORD, SFO, BZN, DTW, JNU, LIRR, TPA, MSN]
 
 
 def after(key: str) -> str:
@@ -145,6 +145,9 @@ class ReviewPage:
     def leave_field(self):
         self.press("Escape")
 
+    def chip(self, text: str):
+        return self.page.locator(".meta .chip", has_text=text)
+
     def effect(self, number: int):
         return self.page.locator("fieldset.effect").nth(number - 1)
 
@@ -156,6 +159,10 @@ class ReviewPage:
 
     def filter_stratum(self, name: str):
         self.page.get_by_role("combobox", name="Stratum").select_option(label=name)
+        self.page.wait_for_load_state("networkidle")
+
+    def filter_half(self, name: str):
+        self.page.get_by_role("combobox", name="Half").select_option(label=name)
         self.page.wait_for_load_state("networkidle")
 
     def filter_status(self, name: str):
