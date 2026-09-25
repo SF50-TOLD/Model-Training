@@ -197,6 +197,7 @@ em { color: var(--muted); font-size: 0.85rem; }
 /* Runs A and B disagree here. */
 .disagree { background: var(--amber-wash); border-radius: 6px; padding: 0.25rem 0.4rem; }
 .flag { color: var(--amber); font-size: 0.8rem; font-weight: 700; margin: 0; }
+.use-b { font-size: 0.75rem; padding: 0 0.4rem; margin-left: 0.3rem; border-color: var(--amber); color: var(--amber); font-weight: 700; }
 .problem { color: var(--red); font-size: 0.8rem; margin: 0; }
 .problem:empty { display: none; }
 

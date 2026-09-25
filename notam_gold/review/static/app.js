@@ -59,6 +59,25 @@ function pathKeys(path) {
   return [...path.matchAll(/([^.[\]]+)|\[(\d+)\]/g)].map((m) => (m[2] !== undefined ? Number(m[2]) : m[1]));
 }
 
+/** A plain deep copy; `structuredClone` rejects Alpine's reactive proxies. */
+function copy(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function getAt(root, path) {
+  return pathKeys(path).reduce((value, key) => (value == null ? undefined : value[key]), root);
+}
+
+function setAt(root, path, value) {
+  const keys = pathKeys(path);
+  const parent = keys.slice(0, -1).reduce((node, key) => node[key], root);
+  parent[keys.at(-1)] = value;
+}
+
+function isWithin(path, prefix) {
+  return path === prefix || path.startsWith(prefix + ".") || path.startsWith(prefix + "[");
+}
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("review", () => ({
     queue: [],
@@ -119,7 +138,7 @@ document.addEventListener("alpine:init", () => {
       if (this.queue[this.index]?.key !== key) return;
       this.current = notam;
       const start = notam.review?.extraction ?? notam.silverA?.extraction ?? emptyExtraction();
-      this.form = structuredClone(start);
+      this.form = copy(start);
       this.note = notam.review?.note ?? "";
       this.message = "";
       this.segments = evidenceSegments(notam.prompt, notam.silverA?.evidence ?? []);
@@ -160,18 +179,28 @@ document.addEventListener("alpine:init", () => {
       return this.current?.disagreements.some((d) => d.path === path) ?? false;
     },
     flagged(path) {
-      return (
-        this.current?.disagreements.some(
-          (d) => d.path === path || d.path.startsWith(path + ".") || d.path.startsWith(path + "["),
-        ) ?? false
-      );
+      return this.differencesWithin(path).length > 0;
     },
+    /** Run B's value at `path` (indexed like run A): run A's value with run B's differences applied. */
     bValue(path) {
-      const exact = this.current?.disagreements.find((d) => d.path === path);
+      const differences = this.differencesWithin(path);
+      const exact = differences.find((d) => d.path === path);
       if (exact) return exact.b;
-      const b = this.current?.silverB?.extraction;
-      if (!b) return undefined;
-      return pathKeys(path).reduce((value, key) => (value == null ? value : value[key]), b);
+      const value = copy(getAt(this.current?.silverA?.extraction, path));
+      for (const d of differences) setAt({ root: value }, "root" + d.path.slice(path.length), copy(d.b));
+      return value;
+    },
+    differencesWithin(path) {
+      return this.current?.disagreements.filter((d) => isWithin(d.path, path)) ?? [];
+    },
+    /** Replace the form's value at `path` with run B's. */
+    useB(path) {
+      for (const d of this.differencesWithin(path)) setAt(this.form, d.path, copy(d.b));
+      this.changed();
+    },
+    addRunBEffects(differences) {
+      for (const d of differences) this.form.effects.push(copy(d.b));
+      this.changed();
     },
     extraEffects() {
       return this.current?.disagreements.filter((d) => d.path.startsWith("effects[B:")) ?? [];
