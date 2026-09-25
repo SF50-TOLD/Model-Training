@@ -70,6 +70,16 @@ def _semantic_problems(extraction: dict):
         if key in seen:
             yield Problem(f"effects[{index}]", "Duplicate effect")
         seen.add(key)
+        for earlier in effects[:index]:
+            if effect["runway"] is not None and effect["runway"] == earlier["runway"] and _combinable(effect, earlier):
+                yield Problem(f"effects[{index}]", f"Combine this with the other effect for runway {effect['runway']}")
+                break
+
+
+def _combinable(first: dict, second: dict) -> bool:
+    """Two effects that state different facts, which therefore belong in one effect for their runway."""
+    both_closed = first["closure"] != "none" and second["closure"] != "none"
+    return not both_closed and not any(first[f] is not None and second[f] is not None for f in _FACT_FIELDS)
 
 
 def _is_single_direction(runway: str | None) -> bool:

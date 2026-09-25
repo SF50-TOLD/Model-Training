@@ -42,7 +42,7 @@ Every key is always present. Optional values are an explicit `null`, never omitt
 
 An effect must state something: a `closure` other than `none`, or at least one non-null field.
 
-When a NOTAM states facts about different designators, each designator gets its own effect, keyed by the designator as written. The canonical case is a partial closure given for `09R/27L` with declared distances given for `09R` and `27L`. That's three effects: the pair's effect carries the closure, and each direction's effect carries only its declared distances, with `closure: "none"`. The closure is **not** repeated on the per-direction effects; the app merges effects by runway.
+Facts about the same designator go in one effect. A second effect for the same designator is only for facts that can't share one, such as a second obstacle. When a NOTAM states facts about different designators, each designator gets its own effect, keyed by the designator as written. The canonical case is a partial closure given for `09R/27L` with declared distances given for `09R` and `27L`. That's three effects: the pair's effect carries the closure, and each direction's effect carries only its declared distances, with `closure: "none"`. The closure is **not** repeated on the per-direction effects; the app merges effects by runway.
 
 ## `Length`, `Depth`, `Distance`
 

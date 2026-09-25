@@ -51,12 +51,26 @@ def test_missing_keys_are_schema_errors():
         (extraction(effect(obstacle=obstacle())), "effects[0].obstacle"),
         (extraction(effect(obstacle=obstacle(latitude=40.0))), "effects[0].obstacle.latitude"),
         (extraction(effect("09", "full"), effect("09", "full")), "effects[1]"),
+        (
+            extraction(
+                effect("30", thresholdDisplacement=length(357)),
+                effect("30", declaredDistances=declared(LDA=length(3518))),
+            ),
+            "effects[1]",
+        ),
         (extraction(effect("9R", "full")), "effects[0].runway"),
         (extraction(effect(surfaceCondition=surface([7, 5, 5]))), "effects[0].surfaceCondition.rwyCC[0]"),
     ],
 )
 def test_semantic_and_schema_problems(value, path):
     assert path in [p for p, _ in problem_paths(value)]
+
+
+def test_one_runway_may_have_effects_that_cannot_be_combined():
+    two_obstacles = extraction(
+        effect("27", obstacle=obstacle(heightAGL=length(100))), effect("27", obstacle=obstacle(heightAGL=length(80)))
+    )
+    assert validate(two_obstacles) == []
 
 
 def test_valid_extraction_has_no_problems():
