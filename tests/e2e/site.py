@@ -171,6 +171,3 @@ class ReviewPage:
 
     def progress(self, stratum: str):
         return self.page.locator(".progress li", has_text=stratum).locator(".n")
-
-    def wait_for_validation(self):
-        self.page.wait_for_timeout(400)

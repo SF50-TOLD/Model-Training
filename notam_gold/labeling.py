@@ -1,8 +1,9 @@
-"""Silver labelling with the Claude Message Batches API, with provenance.
+"""Silver labelling with Claude, with provenance.
 
-Each labelling run is one batch and one ``label_run`` row recording the
-model, prompt version and schema version. Results are stored in
-``silver_label`` rows, which are never modified.
+Each labelling run is one ``label_run`` row recording the model, prompt version
+and schema version. A run is either one Message Batch or a set of synchronous
+requests (``batch_id`` null). Results are stored in ``silver_label`` rows,
+which are never modified.
 """
 
 import hashlib
@@ -13,7 +14,7 @@ import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from functools import cache
+from functools import cache, cached_property
 
 import anthropic
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
@@ -37,11 +38,11 @@ class RunSpec:
     model: str
     shuffle_seed: int | None  # None keeps the examples in file order
 
-    @property
+    @cached_property
     def system_prompt(self) -> str:
         return system_prompt(self.shuffle_seed)
 
-    @property
+    @cached_property
     def prompt_version(self) -> str:
         return hashlib.sha256(self.system_prompt.encode()).hexdigest()[:12]
 

@@ -8,11 +8,7 @@ from notam_gold.disagreement import Difference, diff
 STALE_SQL = """
 SELECT review.notam_key, review.extraction AS reviewed, silver.extraction AS silver
 FROM current_review AS review
-JOIN silver_label AS silver ON silver.id = (
-    SELECT MAX(latest.id) FROM silver_label AS latest
-    JOIN label_run ON label_run.id = latest.run_id
-    WHERE latest.notam_key = review.notam_key AND label_run.name = 'A'
-)
+JOIN latest_silver AS silver ON silver.notam_key = review.notam_key AND silver.run_name = 'A'
 WHERE review.status != 'skipped' AND silver.created_at > review.reviewed_at AND silver.extraction IS NOT NULL
 """
 

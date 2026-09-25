@@ -1,7 +1,8 @@
 """SQLite storage for gold candidates, silver labels and reviews.
 
 Silver labels and reviews are append-only: triggers reject updates and deletes,
-so provenance is never lost. The latest review of a NOTAM is its current one.
+so provenance is never lost. The latest review of a NOTAM is its current one,
+and the latest label from each named run (A or B) is that run's current label.
 """
 
 import json
@@ -57,6 +58,14 @@ CREATE TRIGGER IF NOT EXISTS silver_label_no_update BEFORE UPDATE ON silver_labe
 BEGIN SELECT RAISE(ABORT, 'silver labels are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS silver_label_no_delete BEFORE DELETE ON silver_label
 BEGIN SELECT RAISE(ABORT, 'silver labels are immutable'); END;
+
+CREATE VIEW IF NOT EXISTS latest_silver AS
+SELECT silver_label.*, label_run.name AS run_name, label_run.model, label_run.prompt_version
+FROM silver_label JOIN label_run ON label_run.id = silver_label.run_id
+WHERE silver_label.id IN (
+    SELECT MAX(label.id) FROM silver_label AS label JOIN label_run AS run ON run.id = label.run_id
+    GROUP BY label.notam_key, run.name
+);
 
 CREATE TABLE IF NOT EXISTS disagreement (
     notam_key TEXT PRIMARY KEY REFERENCES notam(id),

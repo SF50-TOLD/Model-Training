@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from notam_gold import db
-from notam_gold.paths import LABELER_DIR, SCHEMA_DOC
+from notam_gold.labeling import examples
+from notam_gold.paths import SCHEMA_DOC
 from notam_gold.prompt import build_prompt
 from notam_gold.reviews import stale_reviews
 from notam_gold.schema import canonicalize, schema_version, validate
@@ -23,7 +24,7 @@ DEV_FRACTION = 0.4
 SPLIT_SALT = "notam-gold-split-v1"
 
 GOLD_SQL = """
-SELECT notam.*, review.id AS review_id, review.reviewer, review.reviewed_at, review.status,
+SELECT notam.*, review.reviewer, review.reviewed_at,
        review.extraction AS gold, review.edited, review.silver_label_id,
        label_run.model AS silver_model, label_run.prompt_version AS silver_prompt_version,
        disagreement.paths AS disagreement_paths
@@ -54,8 +55,7 @@ class GoldRow:
 def worked_example_prompts() -> set[str]:
     """Prompts shown to models as worked examples (SCHEMA.md and the labeler's examples)."""
     schema_examples = re.findall(r"```text\n(.*?)\n```", SCHEMA_DOC.read_text(encoding="utf-8"), re.DOTALL)
-    lines = (LABELER_DIR / "examples.jsonl").read_text(encoding="utf-8").splitlines()
-    return set(schema_examples) | {json.loads(line)["prompt"] for line in lines if line.strip()}
+    return set(schema_examples) | {example["prompt"] for example in examples(shuffle_seed=None)}
 
 
 def split_of(notam_key: str) -> str:

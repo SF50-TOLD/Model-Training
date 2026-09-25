@@ -70,16 +70,19 @@ Reissued NOTAMs are collapsed to one each, and each stratum is spread across air
 ./label_silver.py submit A --confirm-cost
 ./label_silver.py status
 ./label_silver.py ingest <run id>
+./label_silver.py run A --keys FILE   # relabel a few NOTAMs now, outside a batch
 ./label_silver.py disagreements       # after both runs
 ./label_silver.py cost
 ```
 
-Two independent runs label every candidate through the Message Batches API, with structured outputs constrained to the schema:
+Two independent runs label every candidate through the Message Batches API, with structured outputs constrained to the schema. Before each batch, one synchronous request writes the prompt cache so the batch's requests can read it:
 
 - run A uses Claude Opus 5.5;
 - run B uses Claude Opus 5, with the prompt's examples shuffled.
 
 The cached system prompt is [`labeler/system_prompt.md`](labeler/system_prompt.md), then `SCHEMA.md`, then [`labeler/examples.jsonl`](labeler/examples.jsonl). Each label comes with the exact text it relied on (its evidence) and a note on anything ambiguous.
+
+To relabel a few dozen NOTAMs, for example after a rule change, use `run`. It sends the NOTAMs as ordinary synchronous requests at standard prices. Those requests read the prompt cache reliably, whereas concurrent batch requests can miss it and pay for a cache write each.
 
 Every label records its model, prompt version, schema version and timestamp. Silver labels are never modified: database triggers reject updates and deletes. The disagreements between the two runs set the review order.
 
@@ -105,7 +108,9 @@ The review app shows one NOTAM per screen:
 | `J` / `P` | Next / previous |
 | `?` | Help |
 
-The queue opens on unreviewed NOTAMs, most disagreement first. You can filter it by stratum, by disagreement, and by status.
+The queue puts re-reviews first (see below), then unreviewed NOTAMs, then everything already decided. Unreviewed NOTAMs go to whichever stratum has the fewest gold labels in its half (dev or test), so every stratum fills evenly. Within a stratum, the NOTAMs the two runs disagree on most come first. You can filter the queue by stratum, half, disagreement and status, and the filters persist across reloads.
+
+When a rule change leads to a NOTAM being relabelled, and the new run-A label differs from the saved review, the NOTAM comes back as **Needs re-review**. The export leaves it out until it's reviewed again.
 
 Reviews are stored separately from silver labels and are append-only. Each review records:
 
@@ -130,7 +135,7 @@ Writes the accepted and edited reviews to [`eval/`](eval/) in the Evaluations fr
 ruff check . && ruff format --check . && pytest
 ```
 
-`tests/e2e/` drives the review site in headless Chromium through Playwright. Each test gets the app running over its own freshly seeded temporary database, never `data/`. `setup.sh` installs the browser; to install it by hand, run `python -m playwright install chromium`.
+`tests/e2e/` drives the review site through Playwright in headless Chromium and in WebKit, the engine Safari uses. Each test gets the app running over its own freshly seeded temporary database, never `data/`. `setup.sh` installs both browsers; to install them by hand, run `python -m playwright install chromium webkit`.
 
 ## License
 

@@ -82,8 +82,8 @@ echo "Installing dependencies..."
 pip install -r "${SCRIPT_DIR}/requirements.txt"
 
 echo ""
-echo "Installing the headless browser for the review-site tests..."
-python -m playwright install chromium
+echo "Installing the headless browsers for the review-site tests..."
+python -m playwright install chromium webkit
 
 # Create .env if it doesn't exist
 if [ ! -f "${SCRIPT_DIR}/.env" ]; then

@@ -1,31 +1,18 @@
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-.eggs/
-dist/
-build/
 .pytest_cache/
 .ruff_cache/
 
 # Environment
-venv/
 .venv/
 .env
 .python-version
 
-# Signing keys
-*.p8
+# macOS
+.DS_Store
 
 # Corpus, candidates, silver labels and reviews (large or local). The gold set lives in eval/.
 data/
-
-# Backup files
-*.bak
-*.backup
 
 # Logs
 *.log

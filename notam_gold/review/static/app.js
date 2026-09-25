@@ -104,6 +104,7 @@ function setAt(root, path, value) {
   parent[keys.at(-1)] = value;
 }
 
+/** Whether `path` is `prefix` itself or a field or item inside it. */
 function isWithin(path, prefix) {
   return path === prefix || path.startsWith(prefix + ".") || path.startsWith(prefix + "[");
 }
@@ -234,9 +235,7 @@ document.addEventListener("alpine:init", () => {
     },
 
     problemAt(path, includeChildren = false) {
-      const found = this.problems.find(
-        (p) => p.path === path || (includeChildren && (p.path.startsWith(path + ".") || p.path.startsWith(path + "["))),
-      );
+      const found = this.problems.find((p) => (includeChildren ? isWithin(p.path, path) : p.path === path));
       return found?.message ?? "";
     },
 
@@ -281,7 +280,7 @@ document.addEventListener("alpine:init", () => {
     isLit(paths) {
       const hover = this.hoverPath;
       if (!hover || !paths.length) return false;
-      return paths.some((p) => p === hover || p.startsWith(hover + ".") || p.startsWith(hover + "[") || hover.startsWith(p + "."));
+      return paths.some((p) => isWithin(p, hover) || hover.startsWith(p + "."));
     },
 
     textShowsCancel() {

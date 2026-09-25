@@ -2,8 +2,6 @@ import pytest
 
 from notam_gold import strata as s
 
-NEAR_MISS = s.PLAUSIBLE_NEGATIVE
-
 
 @pytest.mark.parametrize(
     ("text", "expected"),

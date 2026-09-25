@@ -44,10 +44,8 @@ def _current_problems(extraction: dict | None, evidence: list[dict], text: str, 
 
 def _silver(connection: sqlite3.Connection, key: str, run_name: str) -> dict | None:
     row = connection.execute(
-        "SELECT silver_label.*, label_run.model, label_run.prompt_version, notam.notam_text FROM silver_label"
-        " JOIN label_run ON label_run.id = run_id JOIN notam ON notam.id = notam_key"
-        " WHERE notam_key = ? AND label_run.name = ?"
-        " ORDER BY silver_label.id DESC LIMIT 1",
+        "SELECT latest_silver.*, notam.notam_text FROM latest_silver JOIN notam ON notam.id = notam_key"
+        " WHERE notam_key = ? AND run_name = ?",
         (key, run_name),
     ).fetchone()
     if row is None:

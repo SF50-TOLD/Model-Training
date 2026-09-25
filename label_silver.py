@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Label gold candidates with Claude via the Message Batches API.
+"""Label gold candidates with Claude, through the Message Batches API or synchronously.
 
     label_silver.py estimate A            # projected cost of labelling every candidate in run A
     label_silver.py submit A --pilot 20   # small pilot batch
@@ -10,7 +10,9 @@
     label_silver.py disagreements         # compare the latest run-A and run-B labels
     label_silver.py cost                  # spend so far, from recorded usage
 
-Batches over the cost limit need --confirm-cost.
+`submit` suits the full candidate set at batch prices. `run` suits a few dozen NOTAMs: it pays
+standard prices, but its requests read the prompt cache reliably. Either needs --confirm-cost
+when its estimate exceeds the cost limit.
 """
 
 import argparse
@@ -131,11 +133,7 @@ def command_ingest(client, connection, args):
 
 
 def latest_labels(connection: sqlite3.Connection, run_name: str) -> dict[str, sqlite3.Row]:
-    rows = connection.execute(
-        "SELECT silver_label.* FROM silver_label JOIN label_run ON label_run.id = run_id"
-        " WHERE label_run.name = ? AND extraction IS NOT NULL ORDER BY silver_label.id",
-        (run_name,),
-    )
+    rows = connection.execute("SELECT * FROM latest_silver WHERE run_name = ? AND extraction IS NOT NULL", (run_name,))
     return {row["notam_key"]: row for row in rows}
 
 
@@ -163,22 +161,24 @@ def command_cost(_client, connection, _args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("estimate", "submit", "run"):
+    for name, handler in (("estimate", command_estimate), ("submit", command_submit), ("run", command_run)):
         command = commands.add_parser(name)
+        command.set_defaults(handler=handler)
         command.add_argument("run", choices=labeling.RUNS)
         command.add_argument("--pilot", type=int, help="only the first N unlabelled candidates")
         command.add_argument("--keys", type=Path, help="only the NOTAM keys listed one per line in this file")
         command.add_argument("--confirm-cost", action="store_true")
-    commands.add_parser("status")
-    commands.add_parser("ingest").add_argument("run_id", type=int)
-    commands.add_parser("disagreements")
-    commands.add_parser("cost")
+    commands.add_parser("status").set_defaults(handler=command_status)
+    ingest = commands.add_parser("ingest")
+    ingest.set_defaults(handler=command_ingest)
+    ingest.add_argument("run_id", type=int)
+    commands.add_parser("disagreements").set_defaults(handler=command_disagreements)
+    commands.add_parser("cost").set_defaults(handler=command_cost)
     args = parser.parse_args()
 
     load_dotenv()
-    handler = globals()[f"command_{args.command}"]
     with db.connect() as connection:
-        handler(anthropic.Anthropic(), connection, args)
+        args.handler(anthropic.Anthropic(), connection, args)
 
 
 if __name__ == "__main__":
