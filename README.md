@@ -129,6 +129,33 @@ Reviews are stored separately from silver labels and are append-only. Each revie
 
 Writes the accepted and edited reviews to [`eval/`](eval/) in the Evaluations framework's `ModelSample` shape. The export includes a stable dev/test split; see [`eval/README.md`](eval/README.md).
 
+## Training the on-device model
+
+The app reads formatted reports (FICON, RSC, SNOWTAM, FAA OBST) with deterministic parsers, and
+everything else with a small model fine-tuned here: Qwen3-0.6B, trained with MLX, converted to Core
+AI. It writes the compact reading format in `training/reading_format.py` (the app decodes the same
+format), never the schema's JSON. Training data never includes a gold NOTAM, its reissues, or its
+text, and nothing from `eval/notam_dev.jsonl` or `eval/notam_test.jsonl`.
+
+These steps use the `notam-train` virtualenv (`pip install -r training/requirements.txt`); run them
+from the repository root.
+
+1. `swift run -c release --package-path ../iOS/NOTAMModel notam-corpus < <(gzip -dc data/corpus.jsonl.gz) > data/parsed.jsonl`
+   lists the NOTAMs the app's parsers read, which never reach the model.
+2. `python -m training.select_training --parsed data/parsed.jsonl` samples the training NOTAMs
+   into `data/notam_train.sqlite`.
+3. `python -m training.label_budgeted A --budget 180 --dual-only`, then `… B …`, then `… A …` labels
+   them in synchronous chunks sized so the worst case never passes the budget. Strata where run A
+   alone erred on reviewed gold get both runs and keep only agreements.
+4. `python -m training.build_dataset` writes `data/training/{train,val}.jsonl`, with label-preserving
+   variants of the scarce numeric strata.
+5. `python -m training.train --out data/models/<name>` fine-tunes; the lowest validation loss wins.
+6. `python -m conversion.convert data/models/<name> data/models/<name>-coreai --quantize int8b32`
+   writes the folder the app loads. Block-wise int8 matches fp16 on the dev half; int4 doesn't.
+
+Evaluate with the iOS repository's harness, `TEST_RUNNER_NOTAM_MODEL_FOLDER=<folder> xcodebuild test
+-scheme NOTAMExtractionEvaluation …`, tuning on the dev half only.
+
 ## Tests
 
 ```bash
