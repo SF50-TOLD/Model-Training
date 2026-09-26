@@ -13,7 +13,8 @@ schema order — exactly the text the on-device decoder emits.
 Labels then follow the conventions both runs get wrong alike (label_rules.py). Validation is carved
 from training by reissue template, never from the gold set:
 **nothing from notam_dev or notam_test is ever written here.** Training NOTAMs in the scarce numeric
-strata also get label-preserving variants (augment.py); validation gets none.
+strata also get label-preserving variants (augment.py), and training gets synthetic NOTAMs for a
+pattern the corpus has no usable examples of (synthetic.py); validation gets neither.
 
     python -m training.build_dataset
 """
@@ -31,6 +32,7 @@ from notam_gold.disagreement import diff
 from notam_gold.paths import DATABASE, EVAL_DIR
 from notam_gold.prompt import build_prompt
 from notam_gold.schema import canonicalize, validate
+from training import synthetic
 from training.augment import variants
 from training.label_rules import corrected
 from training.paths import DATASET_DIR, TRAINING_DATABASE
@@ -167,6 +169,7 @@ def is_validation(notam: sqlite3.Row) -> bool:
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--variants", type=int, default=5, help="augmented variants per scarce training NOTAM")
+    parser.add_argument("--synthetic", type=int, default=80, help="synthetic NOTAMs added to training")
     args = parser.parse_args()
     rng = random.Random(AUGMENT_SEED)
     gold = gold_keys()
@@ -200,6 +203,17 @@ def main():
                 }
                 (val if split == "val" else train).write(json.dumps(row, ensure_ascii=False) + "\n")
                 counts[(split, notam["selected_stratum"])] += 1
+        for index, (prompt, label) in enumerate(synthetic.examples(args.synthetic, rng)):
+            if problems := validate(label):
+                raise SystemExit(f"synthetic example {index} is invalid: {problems}")
+            row = {
+                "notamKey": f"synthetic {index}",
+                "stratum": synthetic.STRATUM,
+                "prompt": prompt,
+                "completion": completion(label),
+            }
+            train.write(json.dumps(row, ensure_ascii=False) + "\n")
+            counts[("train", synthetic.STRATUM)] += 1
     for split in ("train", "val"):
         by_stratum = {k[1]: v for k, v in counts.items() if k[0] == split}
         print(f"{split}: {sum(by_stratum.values()):,}  {by_stratum}")
