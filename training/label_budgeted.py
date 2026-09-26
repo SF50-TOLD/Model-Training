@@ -58,8 +58,19 @@ def spent(connection) -> float:
 
 
 def pending(connection, spec: labeling.RunSpec, dual_only: bool) -> list:
-    """Unlabelled NOTAMs for this run; run B labels only the strata where both runs must agree."""
-    notams = unlabelled(connection, spec)
+    """NOTAMs this run has never labelled; run B labels only the strata where both runs must agree.
+
+    A label from an earlier prompt version still counts: the prompt embeds SCHEMA.md, so any edit to it
+    would otherwise send every training NOTAM back through the API.
+    """
+    labelled = {
+        row[0]
+        for row in connection.execute(
+            "SELECT notam_key FROM silver_label JOIN label_run ON label_run.id = run_id WHERE label_run.name = ?",
+            (spec.name,),
+        )
+    }
+    notams = [n for n in unlabelled(connection, spec) if n["id"] not in labelled]
     if dual_only or spec.name == "B":
         notams = [n for n in notams if n["selected_stratum"] in DUAL_RUN_STRATA]
     return notams
