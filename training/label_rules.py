@@ -8,6 +8,10 @@ to it, and they never touch gold.
   is not a closure (SCHEMA.md scope rule), unless the text also closes that runway outright.
 - An obstacle published in an en-route obstacle list (AIP ENR 5.4, low-flying-zone and vertical
   obstacle lists) isn't in an aerodrome environment, so it isn't recorded.
+- A runway closed only after the last scheduled flight (`RWY 16/34 CLSD AFTER LAST SKED INTL ARR`) is
+  closed conditionally, and a conditional closure isn't recorded.
+- A threshold "further displaced" by some distance states only the increment, not the displacement,
+  so no displacement is recorded unless the text also states the total (`TOTAL DISPLACEMENT 1970FT`).
 """
 
 import copy
@@ -30,6 +34,11 @@ _STATED_FIELDS = (
     "obstacle",
 )
 _EN_ROUTE_LIST = re.compile(r"\bENR\s*5\.4|\bLOW FLYING ZONE\b|\bVERTICAL OBSTACLES\b")
+_AFTER_LAST_FLIGHT = re.compile(
+    rf"\bRWY\s*{_DESIGNATOR}\s+{_CLOSED}\s+(?:AFT|AFTER)\s+(?:THE\s+)?LAST\s+(?:SKED|SCHEDULED)\b"
+)
+_FURTHER_DISPLACED = re.compile(r"\bFURTHER\s+(?:DISPLACED|DSPLCD)\b")
+_TOTAL_DISPLACEMENT = re.compile(r"\bTOTAL\s+(?:DISPLACEMENT|DTHR)\b")
 
 
 def corrected(label: dict, notam_text: str) -> dict:
@@ -37,12 +46,18 @@ def corrected(label: dict, notam_text: str) -> dict:
     text = " ".join(notam_text.upper().split())
     fixed = copy.deepcopy(label)
     one_direction = _designators(_ONE_DIRECTION, text) - _outright_closures(text)
+    conditional = _designators([_AFTER_LAST_FLIGHT], text)
     en_route = bool(_EN_ROUTE_LIST.search(text))
+    increment_only = bool(_FURTHER_DISPLACED.search(text)) and not _TOTAL_DISPLACEMENT.search(text)
     for effect in fixed["effects"]:
         if effect["closure"] == "full" and effect["runway"] in one_direction:
             effect["closure"] = "none"
+        if effect["closure"] != "none" and effect["runway"] in conditional:
+            effect.update(closure="none", closedLength=None, closedEnd=None)
         if en_route:
             effect["obstacle"] = None
+        if increment_only:
+            effect["thresholdDisplacement"] = None
     fixed["effects"] = [e for e in fixed["effects"] if _states_something(e)]
     return fixed
 

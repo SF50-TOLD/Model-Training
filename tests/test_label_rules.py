@@ -33,3 +33,20 @@ def test_an_en_route_obstacle_list_records_no_obstacle():
 def test_an_aerodrome_obstacle_is_kept():
     label = extraction(effect("24L", obstacle=obstacle(heightAGL=length(315))))
     assert corrected(label, "TOWER CRANE APRX 430FT BFR THR 24L. 315FT AGL 375FT AMSL.") == label
+
+
+def test_a_closure_after_the_last_scheduled_flight_is_not_a_closure():
+    label = extraction(effect("16/34", "full"))
+    text = "RWY 16/34 CLSD AFTER LAST SKED INTL ARR DUE WIP. AVBL WITH 60 MIN PN TO ATC"
+    assert corrected(label, text) == extraction()
+
+
+def test_a_further_displacement_without_its_total_records_no_displacement():
+    label = extraction(effect("26", thresholdDisplacement=length(375, "m")))
+    assert corrected(label, "DTHR RWY 26 FURTHER DISPLACED 375M DUE SHIP CRANES OPR IN HARBOUR.") == extraction()
+
+
+def test_a_further_displacement_with_its_total_is_kept():
+    label = extraction(effect("31", thresholdDisplacement=length(522)))
+    text = "THR 31 FURTHER DISPLACED BY 272FT BEYOND PUBLISHED DTHR DUE TREE. (TOTAL DISPLACEMENT 522FT)."
+    assert corrected(label, text) == label
