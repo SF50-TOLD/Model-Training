@@ -5,7 +5,8 @@ displacement, the obstacle's distance before the threshold and its heights above
 and the declared distances that follow (`THR 01 DISPLACED 663FT DUE OBSTACLE 1770FT BFR THR 01 …
 47FT AGL 330FT AMSL`). Every such NOTAM in the corpus is a gold NOTAM or a reissue of one, so training
 has none. These are written from that phrasing with invented runways and values, and each label is
-built from the same values as its text, so the two can't disagree.
+built from the same values as its text, so the two can't disagree. Some prohibit landing and give the
+landing distance as `NOT USABLE`, so the model doesn't learn that every row states all four.
 
 Only training uses them; validation and the gold sets never do.
 """
@@ -44,13 +45,18 @@ def _example(rng: random.Random) -> tuple[str, dict]:
         "thresholdDisplacement": _ft(displacement),
         "obstacle": _obstacle(agl, msl, before_ft, displaced),
     }
+    landing_prohibited = first_closed and rng.random() < 0.4
     if first_closed:
         prose.append(f"FIRST {displacement}FT RWY {displaced} CLSD, AVBL AS TWY.")
         effect |= {"closure": "partial", "closedLength": _ft(displacement), "closedEnd": "thresholdEnd"}
+    if landing_prohibited:
+        prose.append(f"LDG RWY {displaced} NOT AUTH.")
     lines = textwrap.wrap(" ".join(prose), LINE_WIDTH)
     effects = [effect]
     if rng.random() < 0.85:
         distances = _declared_distances(rng, displaced, opposite, runway_ft, displacement, first_closed)
+        if landing_prohibited:
+            distances[displaced]["LDA"] = None
         lines += _declared_lines(rng, distances)
         effect["declaredDistances"] = distances[displaced]
         effects.append(_effect(opposite) | {"declaredDistances": distances[opposite]})
@@ -101,10 +107,14 @@ def _declared_lines(rng: random.Random, distances: dict[str, dict]) -> list[str]
     )
     colon = rng.choice(("", ":"))
     rows = [
-        f"RWY {runway}{colon} " + " ".join(f"{name} {measure['value']}" for name, measure in distances[runway].items())
+        f"RWY {runway}{colon} " + " ".join(f"{name} {_written(measure)}" for name, measure in distances[runway].items())
         for runway in sorted(distances)
     ]
     return [header, *rows]
+
+
+def _written(measure: dict | None) -> str:
+    return str(measure["value"]) if measure else "NOT USABLE"
 
 
 def _effect(runway: str) -> dict:
