@@ -22,7 +22,7 @@ from notam_gold import db, labeling
 from notam_gold.paths import ROOT
 from notam_gold.prompt import build_prompt
 from training.paths import TRAINING_DATABASE
-from training.select_training import DUAL_RUN_QUOTAS
+from training.select_training import DUAL_RUN_STRATA
 
 DEFAULT_CHUNK_SIZE = 50
 OUTPUT_TOKEN_MARGIN = 2
@@ -72,7 +72,7 @@ def pending(connection, spec: labeling.RunSpec, dual_only: bool) -> list:
     }
     notams = [n for n in unlabelled(connection, spec) if n["id"] not in labelled]
     if dual_only or spec.name == "B":
-        notams = [n for n in notams if n["selected_stratum"] in DUAL_RUN_QUOTAS]
+        notams = [n for n in notams if n["selected_stratum"] in DUAL_RUN_STRATA]
     return notams
 
 

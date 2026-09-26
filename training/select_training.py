@@ -11,12 +11,18 @@ Reissues collapse to one NOTAM per template. Each stratum is sampled to its quot
 diversity; the labelling plan (both runs, or run A alone) follows from the stratum. Selection ranks
 interleave the strata, so a --pilot of the first N requests is a mix.
 
+Once labels exist the selection can't change, but --append-targeted adds NOTAMs for patterns misread
+on dev that the training set lacks (TARGETED_PATTERNS), excluding everything already in
+training as well as gold. They get both runs.
+
     python -m training.select_training --parsed parsed.jsonl
+    python -m training.select_training --parsed parsed.jsonl --append-targeted
 """
 
 import argparse
 import json
 import random
+import re
 import sqlite3
 from collections import Counter
 from pathlib import Path
@@ -43,13 +49,26 @@ DUAL_RUN_QUOTAS = {
 }
 SINGLE_RUN_QUOTAS = {s.CANCELLED: 500, s.PLAUSIBLE_NEGATIVE: 1200, s.OTHER_NEGATIVE: 500}
 
+# A height above ground that isn't an obstacle's (procedure minima, altitude restrictions) beside a
+# runway, and obstacles withdrawn from a list: both were misread as obstacles on dev.
+RUNWAY_AGL_ALTITUDE = "runway_agl_altitude"
+WITHDRAWN_OBSTACLE = "withdrawn_obstacle"
+TARGETED_QUOTAS = {RUNWAY_AGL_ALTITUDE: 80, WITHDRAWN_OBSTACLE: 30}
+TARGETED_PATTERNS = {
+    RUNWAY_AGL_ALTITUDE: re.compile(r"\bRWY\b.*\bAGL\b|\bAGL\b.*\bRWY\b"),
+    WITHDRAWN_OBSTACLE: re.compile(
+        r"\b(?:OBST|CRANE|TOWER|MAST|TURBINE)S?\b.*\b(?:WITHDRAWN|DISMANTLED|REMOVED|NO LONGER)\b"
+    ),
+}
+DUAL_RUN_STRATA = {*DUAL_RUN_QUOTAS, *TARGETED_QUOTAS}
+
 
 def normalized_text(text: str) -> str:
     return " ".join(text.upper().split())
 
 
-def gold_exclusions(connection: sqlite3.Connection) -> tuple[set, set, set]:
-    """IDs, reissue templates and normalised texts of every gold candidate."""
+def exclusions(connection: sqlite3.Connection) -> tuple[set, set, set]:
+    """IDs, reissue templates and normalised texts of every NOTAM in a gold or training database."""
     rows = connection.execute("SELECT id, icao_location, notam_text FROM notam").fetchall()
     return (
         {r["id"] for r in rows},
@@ -105,10 +124,33 @@ def interleave(per_stratum: dict[str, list[Candidate]]) -> list[tuple[Candidate,
     return order
 
 
+def select_targeted(candidates: list[Candidate], records: dict, rng: random.Random) -> list[tuple[Candidate, str]]:
+    """Targeted NOTAMs, each matched against its stratum's pattern; cancellations never qualify."""
+    per_stratum: dict[str, list[Candidate]] = {}
+    for candidate in collapse_reissues(candidates, rng):
+        if s.CANCELLED in candidate.strata:
+            continue
+        text = normalized_text(records[candidate.id]["notam_text"])
+        for stratum, pattern in TARGETED_PATTERNS.items():
+            if pattern.search(text) and (stratum != RUNWAY_AGL_ALTITUDE or s.OBSTACLE not in candidate.strata):
+                per_stratum.setdefault(stratum, []).append(candidate)
+                break
+    return interleave(
+        {
+            stratum: sample(per_stratum.get(stratum, []), quota, PER_AIRPORT, rng)
+            for stratum, quota in TARGETED_QUOTAS.items()
+        }
+    )
+
+
 def write(connection: sqlite3.Connection, records: dict, selected: list[tuple[Candidate, str]]):
     if connection.execute("SELECT COUNT(*) FROM silver_label").fetchone()[0]:
         raise SystemExit("Training labels exist; refusing to change the training set under them.")
     connection.execute("DELETE FROM notam")
+    insert(connection, records, selected, first_rank=0)
+
+
+def insert(connection: sqlite3.Connection, records: dict, selected: list[tuple[Candidate, str]], first_rank: int):
     connection.executemany(
         "INSERT INTO notam VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
@@ -126,7 +168,7 @@ def write(connection: sqlite3.Connection, records: dict, selected: list[tuple[Ca
                 rank,
                 SEED,
             )
-            for rank, (c, stratum) in enumerate(selected)
+            for rank, (c, stratum) in enumerate(selected, start=first_rank)
         ],
     )
 
@@ -134,19 +176,40 @@ def write(connection: sqlite3.Connection, records: dict, selected: list[tuple[Ca
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--parsed", type=Path, required=True, help="notam-corpus output for data/corpus.jsonl.gz")
+    parser.add_argument("--append-targeted", action="store_true", help="add TARGETED_PATTERNS NOTAMs")
     args = parser.parse_args()
 
     records = {r["id"]: r for r in corpus.read_jsonl_gz(CORPUS) if r["notam_text"].strip()}
     with db.connect(DATABASE) as gold:
-        excluded = gold_exclusions(gold)
+        excluded = exclusions(gold)
+    if args.append_targeted:
+        append_targeted(records, excluded, parser_read_ids(args.parsed))
+        return
     candidates = eligible(records, excluded, parser_read_ids(args.parsed))
     selected = select(candidates, random.Random(SEED))
 
     with db.connect(TRAINING_DATABASE) as connection:
         write(connection, records, selected)
+    report(selected, s.ALL_STRATA)
+
+
+def append_targeted(records: dict, gold: tuple[set, set, set], parsed: set[str]):
+    with db.connect(TRAINING_DATABASE) as connection:
+        training = exclusions(connection)
+        already = "SELECT COUNT(*) FROM notam WHERE selected_stratum IN (?, ?)"
+        if connection.execute(already, tuple(TARGETED_QUOTAS)).fetchone()[0]:
+            raise SystemExit("Targeted NOTAMs are already in the training set.")
+        excluded = tuple(g | t for g, t in zip(gold, training, strict=True))
+        selected = select_targeted(eligible(records, excluded, parsed), records, random.Random(SEED))
+        first_rank = connection.execute("SELECT COALESCE(MAX(selection_rank), -1) + 1 FROM notam").fetchone()[0]
+        insert(connection, records, selected, first_rank)
+    report(selected, TARGETED_QUOTAS)
+
+
+def report(selected: list[tuple[Candidate, str]], strata):
     counts = Counter(stratum for _, stratum in selected)
-    for stratum in s.ALL_STRATA:
-        plan = "A+B" if stratum in DUAL_RUN_QUOTAS else "A"
+    for stratum in strata:
+        plan = "A+B" if stratum in DUAL_RUN_STRATA else "A"
         print(f"  {stratum:<22} {counts[stratum]:>6,}  ({plan})")
     print(f"  {'total':<22} {len(selected):>6,}")
 
