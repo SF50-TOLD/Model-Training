@@ -1,10 +1,12 @@
 """Convert a fine-tuned NOTAM model to the folder the app's `NOTAMModelReader` loads.
 
 The folder holds the Core AI model (`model.aimodel`), the tokenizer files, and `notam-model.json`,
-which tells the reader the prompt template, end token, vocabulary and context sizes, and the schema
-version the model was trained on.
+which tells the reader the prompt template, end token, vocabulary and context sizes, the schema
+version the model was trained on, the model's version, and the fields it may propose
+(conversion/proposable.py; none unless listed).
 
-    python -m conversion.convert data/models/qwen3-0.6b-notam data/models/qwen3-0.6b-notam-coreai --quantize int8b32
+    python -m conversion.convert data/models/qwen3-0.6b-notam data/models/qwen3-0.6b-notam-coreai --quantize int8b32 \
+        --proposable-fields closedLength,closedEnd,rwyCC,contaminants
 """
 
 import argparse
@@ -19,6 +21,7 @@ from coreai_torch import TorchConverter
 from torch.export import Dim
 from transformers import AutoTokenizer
 
+from conversion.proposable import proposable_fields
 from conversion.quantize import quantize_linears
 from conversion.qwen3_static import Qwen3Static
 from notam_gold.schema import schema_version
@@ -57,15 +60,17 @@ def convert(model: Qwen3Static, destination: Path):
     program.save_asset(destination)
 
 
-def manifest(tokenizer, model: Qwen3Static) -> dict:
+def manifest(tokenizer, model: Qwen3Static, version: str, proposable: list[str]) -> dict:
     return {
         "model": MODEL_FILE,
+        "modelVersion": version,
         "schemaVersion": schema_version(),
         "promptTemplate": PROMPT_TEMPLATE,
         "endOfSequence": tokenizer.convert_tokens_to_ids(END_OF_READING),
         "vocabularySize": model.cfg["vocab_size"],
         "contextLength": model.max_context,
         "maximumOutputTokens": MAXIMUM_OUTPUT_TOKENS,
+        "proposableFields": proposable,
     }
 
 
@@ -75,6 +80,10 @@ def main():
     parser.add_argument("out", type=Path, help="model folder to write")
     parser.add_argument("--quantize", default="none", choices=["none", "int8", "int4", "int8b32", "int4b16"])
     parser.add_argument("--max-context", type=int, default=1536)
+    parser.add_argument("--version", help="the model's version (default: the output folder's name)")
+    parser.add_argument(
+        "--proposable-fields", type=proposable_fields, default=[], help="fields that cleared the gate, comma-separated"
+    )
     args = parser.parse_args()
 
     model = Qwen3Static.from_pretrained(args.trained, args.max_context, torch.float16)
@@ -89,7 +98,8 @@ def main():
     convert(model, args.out / MODEL_FILE)
     for name in TOKENIZER_FILES:
         shutil.copy(args.trained / name, args.out / name)
-    (args.out / MANIFEST_FILE).write_text(json.dumps(manifest(tokenizer, model), indent=2) + "\n")
+    contents = manifest(tokenizer, model, args.version or args.out.name, args.proposable_fields)
+    (args.out / MANIFEST_FILE).write_text(json.dumps(contents, indent=2) + "\n")
     print(f"converted in {time.perf_counter() - started:.0f}s -> {args.out}")
 
 
