@@ -22,7 +22,7 @@ from notam_gold import db, labeling
 from notam_gold.paths import ROOT
 from notam_gold.prompt import build_prompt
 from training.paths import TRAINING_DATABASE
-from training.select_training import DUAL_RUN_QUOTAS
+from training.select_training import DUAL_RUN_STRATA
 
 DEFAULT_CHUNK_SIZE = 50
 OUTPUT_TOKEN_MARGIN = 2
@@ -61,7 +61,7 @@ def pending(connection, spec: labeling.RunSpec, dual_only: bool) -> list:
     """Unlabelled NOTAMs for this run; run B labels only the strata where both runs must agree."""
     notams = unlabelled(connection, spec)
     if dual_only or spec.name == "B":
-        notams = [n for n in notams if n["selected_stratum"] in DUAL_RUN_QUOTAS]
+        notams = [n for n in notams if n["selected_stratum"] in DUAL_RUN_STRATA]
     return notams
 
 

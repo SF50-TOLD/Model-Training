@@ -36,7 +36,7 @@ from training import synthetic
 from training.augment import variants
 from training.label_rules import corrected
 from training.paths import DATASET_DIR, TRAINING_DATABASE
-from training.select_training import DUAL_RUN_QUOTAS, normalized_text
+from training.select_training import DUAL_RUN_STRATA, normalized_text
 
 VALIDATION_SHARE = 0.05
 SPLIT_SALT = "notam-train-split-v1"
@@ -119,7 +119,7 @@ def kept_label(key: str, stratum: str, labels: dict) -> dict | None:
     a, b = labels.get((key, "A")), labels.get((key, "B"))
     if a is None:
         return None
-    if stratum in DUAL_RUN_QUOTAS:
+    if stratum in DUAL_RUN_STRATA:
         return a if b is not None and not diff(a, b) else None
     return a
 
