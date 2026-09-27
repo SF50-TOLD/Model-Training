@@ -1,33 +1,18 @@
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-.eggs/
-dist/
-build/
+.pytest_cache/
+.ruff_cache/
 
 # Environment
-venv/
+.venv/
 .env
 .python-version
 
-# Signing keys
-*.p8
+# macOS
+.DS_Store
 
-# Adapter training toolkit (downloaded)
-adapter_training_toolkit_v*/
-
-# Data files (large, generated)
+# Corpus, candidates, silver labels and reviews (large or local). The gold set lives in eval/.
 data/
-checkpoints/
-exports/
-
-# Backup files
-*.bak
-*.backup
 
 # Logs
 *.log
