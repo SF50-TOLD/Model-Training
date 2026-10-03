@@ -11,7 +11,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_NAME="notam-gold"
-PYTHON_VERSION="3.14.5"
+PYTHON_VERSION="3.14.8"
 
 echo "============================================================"
 echo "NOTAM Gold Evaluation Set - Environment Setup"
