@@ -2,8 +2,8 @@
 
 Training NOTAMs come from data/corpus.jsonl.gz, minus:
 
-- every gold candidate, matched by ID, reissue template and whitespace-normalised text, so neither
-  half of the gold set can leak into training through a reissue or a verbatim copy;
+- every gold or held-out candidate, matched by ID, reissue template and whitespace-normalised text,
+  so no evaluation NOTAM can leak into training through a reissue or a verbatim copy;
 - every NOTAM the app's formatted-report parsers read whole (the list `notam-corpus` writes), since
   those never reach the model.
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 from notam_gold import corpus, db
 from notam_gold import strata as s
-from notam_gold.paths import CORPUS, DATABASE
+from notam_gold.paths import CORPUS, DATABASE, HOLDOUT_DATABASE
 from notam_gold.selection import Candidate, collapse_reissues, sample
 from training.paths import TRAINING_DATABASE
 
@@ -75,6 +75,11 @@ def exclusions(connection: sqlite3.Connection) -> tuple[set, set, set]:
         {s.template_key(r["icao_location"], r["notam_text"]) for r in rows},
         {normalized_text(r["notam_text"]) for r in rows},
     )
+
+
+def combined(*excluded: tuple[set, set, set]) -> tuple[set, set, set]:
+    ids, templates, texts = zip(*excluded, strict=True)
+    return set().union(*ids), set().union(*templates), set().union(*texts)
 
 
 def parser_read_ids(path: Path) -> set[str]:
@@ -180,8 +185,8 @@ def main():
     args = parser.parse_args()
 
     records = {r["id"]: r for r in corpus.read_jsonl_gz(CORPUS) if r["notam_text"].strip()}
-    with db.connect(DATABASE) as gold:
-        excluded = exclusions(gold)
+    with db.connect(DATABASE) as gold, db.connect(HOLDOUT_DATABASE) as held_out:
+        excluded = combined(exclusions(gold), exclusions(held_out))
     if args.append_targeted:
         append_targeted(records, excluded, parser_read_ids(args.parsed))
         return
@@ -193,13 +198,13 @@ def main():
     report(selected, s.ALL_STRATA)
 
 
-def append_targeted(records: dict, gold: tuple[set, set, set], parsed: set[str]):
+def append_targeted(records: dict, evaluation: tuple[set, set, set], parsed: set[str]):
     with db.connect(TRAINING_DATABASE) as connection:
         training = exclusions(connection)
         already = "SELECT COUNT(*) FROM notam WHERE selected_stratum IN (?, ?)"
         if connection.execute(already, tuple(TARGETED_QUOTAS)).fetchone()[0]:
             raise SystemExit("Targeted NOTAMs are already in the training set.")
-        excluded = tuple(g | t for g, t in zip(gold, training, strict=True))
+        excluded = combined(evaluation, training)
         selected = select_targeted(eligible(records, excluded, parsed), records, random.Random(SEED))
         first_rank = connection.execute("SELECT COALESCE(MAX(selection_rank), -1) + 1 FROM notam").fetchone()[0]
         insert(connection, records, selected, first_rank)

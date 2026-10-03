@@ -36,6 +36,8 @@ Downloads every NOTAM from the NOTAM API into `data/notams_<date>.jsonl.gz`. It 
 
 `notam_id` alone isn't unique, because series numbers repeat between countries. NOTAMs are therefore identified by location plus `notam_id`, and deduplicated on that and then on their content. To re-merge without downloading again, pass `--skip-download`.
 
+`./download_notams.py --holdout` collects NOTAMs for a fresh held-out test set. It saves only NOTAMs that nothing local has yet, to `data/holdout/`, and prints how many usable displaced-threshold, partial-closure and declared-distance NOTAMs the holdout has. Those strata are the scarce ones. `data/holdout/` is never merged into the corpus, so training never sees these NOTAMs. Run it at least every few weeks, because the API drops NOTAMs 30 days after they expire.
+
 ### 2. Strata and gold candidates
 
 ```bash
@@ -129,11 +131,27 @@ Reviews are stored separately from silver labels and are append-only. Each revie
 
 Writes the accepted and edited reviews to [`eval/`](eval/) in the Evaluations framework's `ModelSample` shape. The export includes a stable dev/test split; see [`eval/README.md`](eval/README.md).
 
+### 6. A fresh held-out set
+
+The test half stays honest only while nobody tunes against it. Once it has gated a few models, a fresh set of NOTAMs that no model has trained or been tuned on replaces it:
+
+```bash
+./download_notams.py --holdout        # daily, until the scarce strata fill
+./select_holdout.py                   # 200 candidates → data/notam_holdout.sqlite
+./label_silver.py --holdout run A --confirm-cost
+./label_silver.py --holdout run B --confirm-cost
+./label_silver.py --holdout disagreements
+./review.py --holdout
+./export_gold.py --holdout            # eval/notam_holdout.jsonl
+```
+
+Candidates come from the NOTAMs `--holdout` collected, which are newer than the corpus. A stratum they can't fill takes the rest from the [Zenodo dataset 17208970](https://zenodo.org/records/17208970) (CC BY 4.0), downloaded to `data/external/zenodo-17208970/`. Zenodo NOTAMs are rewritten into the text the NOTAM API serves. No candidate shares a reissue template with the corpus, and training selection excludes every held-out candidate, as it does gold. The held-out set has no halves: all of it is for the accuracy gate.
+
 ## The training set
 
 Models trained here learn from silver-labelled corpus NOTAMs. Training data never includes a gold
-NOTAM, its reissues, or its text, and nothing from `eval/notam_dev.jsonl` or `eval/notam_test.jsonl`.
-Run these steps from the repository root.
+NOTAM, its reissues, or its text, and nothing from `eval/notam_dev.jsonl` or
+`eval/notam_test.jsonl`. Run these steps from the repository root.
 
 1. `swift run -c release --package-path ../iOS/NOTAMModel notam-corpus < <(gzip -dc data/corpus.jsonl.gz) > data/parsed.jsonl`
    lists the NOTAMs the app's parsers read, which are left out.
