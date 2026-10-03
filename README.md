@@ -138,6 +138,7 @@ The test half stays honest only while nobody tunes against it. Once it has gated
 ```bash
 ./download_notams.py --holdout        # daily, until the scarce strata fill
 ./select_holdout.py                   # 200 candidates → data/notam_holdout.sqlite
+./select_holdout.py --append          # a second, value-weighted batch of 150, once
 ./label_silver.py --holdout run A --confirm-cost
 ./label_silver.py --holdout run B --confirm-cost
 ./label_silver.py --holdout disagreements
