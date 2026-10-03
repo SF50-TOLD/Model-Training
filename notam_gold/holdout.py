@@ -40,6 +40,18 @@ QUOTAS = {
     s.PLAUSIBLE_NEGATIVE: 28,
     s.OTHER_NEGATIVE: 12,
 }
+# A second batch, weighted toward the strata that state values, for a gate that needs at least 299 NOTAMs.
+ADDITION_SEED = 2029
+ADDITION_QUOTAS = {
+    s.DECLARED_DISTANCES: 25,
+    s.DISPLACED_THRESHOLD: 25,
+    s.PARTIAL_CLOSURE: 25,
+    s.FICON_RWYCC: 20,
+    s.FICON_NO_RWYCC: 15,
+    s.OBSTACLE: 20,
+    s.FULL_CLOSURE: 10,
+    s.PLAUSIBLE_NEGATIVE: 10,
+}
 
 ICAO_HEADER = re.compile(r"^([A-Z])(\d{4})(\d{2})\s+NOTAM([NRC])\b")
 ICAO_ITEM = {item: re.compile(rf"\b{item}\)\s*(\w+)") for item in "ABC"}
@@ -129,7 +141,9 @@ def candidates(records: Iterable[dict], excluded_templates: set) -> list[Candida
     ]
 
 
-def select(api: list[Candidate], zenodo: list[Candidate], seed: int = SEED) -> list[tuple[Candidate, str]]:
+def select(
+    api: list[Candidate], zenodo: list[Candidate], seed: int = SEED, quotas: dict[str, int] = QUOTAS
+) -> list[tuple[Candidate, str]]:
     """Each stratum's quota, filled from the collected API NOTAMs first and then from Zenodo."""
     rng = random.Random(seed)
     api_ids = {c.id for c in api}
@@ -137,7 +151,7 @@ def select(api: list[Candidate], zenodo: list[Candidate], seed: int = SEED) -> l
     for candidate in collapse_reissues([*api, *zenodo], rng):
         pools.setdefault((candidate.id in api_ids, candidate.primary), []).append(candidate)
     selected = []
-    for stratum, quota in QUOTAS.items():
+    for stratum, quota in quotas.items():
         chosen = sample(pools.get((True, stratum), []), quota, PER_AIRPORT, rng)
         chosen += sample(pools.get((False, stratum), []), quota - len(chosen), PER_AIRPORT, rng)
         selected += [(candidate, stratum) for candidate in chosen]
