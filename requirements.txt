@@ -9,6 +9,9 @@ tqdm>=4.66
 # Validation
 jsonschema>=4.23
 
+# External datasets
+openpyxl>=3.1
+
 # Review app
 fastapi>=0.115
 uvicorn>=0.32

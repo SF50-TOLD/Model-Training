@@ -9,6 +9,7 @@
     label_silver.py ingest 3              # store a finished batch's results
     label_silver.py disagreements         # compare the latest run-A and run-B labels
     label_silver.py cost                  # spend so far, from recorded usage
+    label_silver.py --holdout run A       # any command, against the held-out set's database
 
 `submit` suits the full candidate set at batch prices. `run` suits a few dozen NOTAMs: it pays
 standard prices, but its requests read the prompt cache reliably. Either needs --confirm-cost
@@ -24,6 +25,7 @@ from dotenv import load_dotenv
 
 from notam_gold import db, labeling
 from notam_gold.disagreement import diff, score
+from notam_gold.paths import DATABASE, HOLDOUT_DATABASE
 from notam_gold.prompt import build_prompt
 
 COST_LIMIT_USD = 25
@@ -160,6 +162,7 @@ def command_cost(_client, connection, _args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--holdout", action="store_true", help="use the held-out set's database")
     commands = parser.add_subparsers(dest="command", required=True)
     for name, handler in (("estimate", command_estimate), ("submit", command_submit), ("run", command_run)):
         command = commands.add_parser(name)
@@ -177,7 +180,7 @@ def main():
     args = parser.parse_args()
 
     load_dotenv()
-    with db.connect() as connection:
+    with db.connect(HOLDOUT_DATABASE if args.holdout else DATABASE) as connection:
         args.handler(anthropic.Anthropic(), connection, args)
 
 

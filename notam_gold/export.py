@@ -97,6 +97,7 @@ def gold_rows(connection: sqlite3.Connection) -> list[GoldRow]:
             "silverDisagreement": bool(disagreements),
             "disagreementPaths": [d["path"] for d in disagreements],
             "metadataCanceled": row["nms_type"] == "C",
+            "source": row["source"],
             "workedExample": prompt in examples,
             "effectiveStart": row["effective_start"],
             "effectiveEnd": row["effective_end"],
@@ -128,3 +129,11 @@ def export(connection: sqlite3.Connection, directory: Path) -> dict[str, Counter
     counts = {"gold": Counter(r.meta["selectedStratum"] for r in rows)}
     counts |= {name: Counter(r.meta["selectedStratum"] for r in half) for name, half in halves.items()}
     return counts
+
+
+def export_holdout(connection: sqlite3.Connection, directory: Path) -> Counter:
+    """Write the held-out set, minus worked examples, to ``directory``; returns its stratum counts."""
+    rows = [r for r in gold_rows(connection) if not r.meta["workedExample"]]
+    directory.mkdir(parents=True, exist_ok=True)
+    write(rows, directory / "notam_holdout.jsonl", directory / "notam_holdout.meta.jsonl")
+    return Counter(r.meta["selectedStratum"] for r in rows)

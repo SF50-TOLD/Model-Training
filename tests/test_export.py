@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from notam_gold.export import InvalidGoldLabelError, export, split_of
+from notam_gold.export import InvalidGoldLabelError, export, export_holdout, split_of
 from tests.factories import effect, extraction, length
 
 
@@ -69,7 +69,7 @@ def test_leaves_out_reviews_the_labelling_rules_have_changed(gold_db, tmp_path):
     assert (tmp_path / "notam_gold.jsonl").read_text() == ""
 
 
-def test_worked_examples_are_flagged_and_kept_out_of_the_test_half(gold_db, tmp_path, monkeypatch):
+def test_worked_examples_are_flagged_and_kept_out_of_the_test_half_and_holdout(gold_db, tmp_path, monkeypatch):
     keys = [gold_db.add_notam(f"E{n}/2026", text=f"RWY {n:02} CLSD") for n in range(1, 30)]
     for key in keys:
         gold_db.add_review(key, "accepted", extraction(effect(f"{int(key.split('E')[1].split('/')[0]):02}", "full")))
@@ -87,3 +87,7 @@ def test_worked_examples_are_flagged_and_kept_out_of_the_test_half(gold_db, tmp_
     assert gold[example]["workedExample"] is True
     assert example not in test
     assert sum(not m["workedExample"] for m in gold.values()) == len(keys) - 1
+
+    export_holdout(gold_db.connection, tmp_path)
+    holdout = {m["notamKey"] for m in read_jsonl(tmp_path / "notam_holdout.meta.jsonl")}
+    assert holdout == set(keys) - {example}

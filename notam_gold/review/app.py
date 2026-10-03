@@ -2,6 +2,7 @@
 
 import sqlite3
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -92,8 +93,10 @@ def _queue_status(row: sqlite3.Row, stale: dict) -> str:
     return "stale" if row["key"] in stale else row["status"] or "unreviewed"
 
 
-def create_app(database: Path, reviewer: str) -> FastAPI:
+def create_app(database: Path, reviewer: str, half_of: Callable[[str], str | None] = split_of) -> FastAPI:
     """The review app over ``database``, attributing reviews to ``reviewer``.
+
+    ``half_of`` gives a NOTAM's half (dev or test); a set without halves returns None.
 
     Every handler is ``async`` so all database work runs on the event loop's thread:
     this SQLite build is not serialized (``sqlite3.threadsafety == 1``), and sharing
@@ -133,7 +136,7 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
                 "stratum": row["selected_stratum"],
                 "score": row["score"],
                 "status": _queue_status(row, stale),
-                "half": split_of(row["key"]),
+                "half": half_of(row["key"]),
             }
             for row in connection.execute(QUEUE_SQL)
         ]
@@ -177,7 +180,7 @@ def create_app(database: Path, reviewer: str) -> FastAPI:
             "prompt": build_prompt(row["icao_location"], row["notam_text"]),
             "strata": db.loads(row["strata"]),
             "stratum": row["selected_stratum"],
-            "half": split_of(key),
+            "half": half_of(key),
             "nmsType": row["nms_type"],
             "effectiveStart": row["effective_start"],
             "effectiveEnd": row["effective_end"],
