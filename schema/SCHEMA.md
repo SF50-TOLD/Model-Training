@@ -1,6 +1,6 @@
 # NOTAM extraction schema
 
-This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.4.0). The same contract is used in three places:
+This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.5.0). The same contract is used in three places:
 
 - the silver labeler's instructions;
 - the human review tool;
@@ -32,10 +32,10 @@ Every key is always present. Optional values are an explicit `null`, never omitt
 | Field | Type | Rule |
 |---|---|---|
 | `runway` | string? | The designator exactly as the text writes it, normalised to `^\d{2}[LCR]?(/\d{2}[LCR]?)?$`: zero-pad (`9R` → `09R`), and write a pair with a slash (`18C-36C` → `18C/36C`). Use `null` when the effect applies to the aerodrome or to all runways, or when the text names no runway (`RWY` with no number, or an obstacle with no runway reference). Never infer the designator from the airport's layout. |
-| `closure` | `none` / `full` / `partial` | What this effect states about closure. `full`: the runway is stated closed (`CLSD`, `CLOSED`, `NOT AVBL`), including closures with exceptions (`CLSD EXC PPR`, `CLSD EXC SKED ACFT`). `partial`: a stated portion is closed (`W 1713FT CLSD`, `CLOSED FIRST 1,500 FT`, `N OF TWY K CLSD`). `none`: the effect states no closure. |
+| `closure` | `none` / `full` / `partial` | What this effect states about closure. `full`: the runway is stated closed (`CLSD`, `CLOSED`, `NOT AVBL`), including closures with exceptions (`CLSD EXC PPR`, `CLSD EXC SKED ACFT`), unless the exceptions include the SF50 or the closure applies only at stated times (see Scope rule). `partial`: a stated portion is closed (`W 1713FT CLSD`, `CLOSED FIRST 1,500 FT`, `N OF TWY K CLSD`). `none`: the effect states no closure. |
 | `closedLength` | Length? | Length of the closed portion, only when `closure` is `partial` and the length is stated. |
 | `closedEnd` | string? | Where the closed portion is, as stated, only when `closure` is `partial`. Write it as one of: a compass abbreviation (`NORTH END` → `N`, `W` → `W`); a runway end (`27L`); or, for a portion counted from one end of the effect's runway, `thresholdEnd` (`FIRST`/`FST 1500FT RWY 34`) or `departureEnd` (`LAST 90M RWY 10`). `thresholdEnd` and `departureEnd` are relative to the effect's `runway` and require a single direction. Use `null` when the text doesn't say where: FIRST or LAST given against a runway pair (`RWY 24L/6R CLOSED FIRST 1,500 FT`), or a position relative to a taxiway (`N OF TWY K`). When a NOTAM closes portions at both ends of different directions, each direction gets its own effect. |
-| `thresholdDisplacement` | Length? | The stated displacement of this runway's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). A relocated threshold (`THR RELOCATED 1040FT`) is recorded here too: it shortens the runway, and that shortening is what the app needs. Requires a single-direction `runway`. |
+| `thresholdDisplacement` | Length? | The stated displacement of this runway's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). A relocated threshold (`THR RELOCATED 1040FT`) is recorded here too: it shortens the runway, and that shortening is what the app needs. When the text gives only a further displacement beyond a published one (`FURTHER DISPLACED BY 180M`), record the total if it is stated (`TOTAL DISPLACEMENT 589FT`), otherwise `null`. Requires a single-direction `runway`. |
 | `declaredDistances` | DeclaredDistances? | Declared distances as stated for this direction. Requires a single-direction `runway`. Use `null` when the text states none, or when no unit can be found for them (see Units). |
 | `surfaceCondition` | SurfaceCondition? | A runway condition report: FAA `FICON`, Canadian `RSC`, or an ICAO `SNOWTAM` (GRF runway condition report). |
 | `obstacle` | Obstacle? | A physical obstacle (crane, tower, rig, etc.) reported with a height or position. |
@@ -164,6 +164,7 @@ Everything else gets `effects: []`.
 | ILS, localizer, glideslope, VOR, DME, GPS or other navaid outages | `[]` |
 | Taxiway or apron closures, and taxiway or apron FICONs (`TWY … FICON`, `APRON … FICON`) | `[]` |
 | Procedure minima, SID/STAR/IAP changes, circling restrictions | `[]` |
+| A runway fact given only as the reason (`DUE …`) for an out-of-scope change (`AUTH TO CIRCLING MINIMA ONLY … DUE THR DISPLACED`); a fact the text states in its own right is recorded | not recorded: the NOTAM that states the fact itself carries it; `[]` unless something else qualifies |
 | An obstacle named in an instrument approach procedure (IAP) or minima NOTAM (`IAP … TEMPORARY CRANE 809 MSL 1.36NM NW OF RWY 31`) | not recorded: approach obstacles are not takeoff obstacles; `[]` unless something else qualifies |
 | An obstacle named in an obstacle departure procedure (`ODP … TEMPORARY CRANE 4739 FT FROM DER`) | effect with `obstacle`: departure obstacles are takeoff obstacles |
 | An obstacle that exists only under a stated condition (`OBST EXISTS ONLY WHEN RAISED`) | not recorded |
@@ -174,7 +175,9 @@ Everything else gets `effects: []`.
 | Runway markings, signs, ungrooved sections, rubber removal, grass cutting | `[]` |
 | A runway closed only to a class of aircraft that excludes the SF50 (`CLSD TO ACFT WINGSPAN MORE THAN 118FT`, `CLSD TO ACFT OVER 12500LBS`, `CLSD TO HEL`) | `[]` |
 | A runway closed to a class of aircraft that includes the SF50 (`CLSD TO JET TFC`, `CLSD TO FIXED WING ACFT`) | `closure: "full"` |
-| A runway closed with exceptions (`CLSD EXC PPR`) | `closure: "full"` |
+| A runway closed with exceptions that include the SF50 (`CLSD EXC ACFT WINGSPAN LESS THAN 79FT`) | `[]`: in effect, closed only to a class that excludes the SF50 |
+| A runway closed with other exceptions (`CLSD EXC PPR`) | `closure: "full"` |
+| A runway or portion closed only at stated times within the NOTAM's validity (`CLSD DLY 2200-0600`, `CLSD AFTER LAST SKED FLT`, `CLSD MON-FRI 0800-1600`) | not a closure; `[]` unless something else qualifies |
 | Takeoff or landing not available in one direction only (`LDG RWY 16R NOT AVBL`) | not a closure; `[]` unless something else qualifies |
 | "Effective operating length", "available length" or "remaining" figures that aren't labelled as declared distances | not recorded |
 | A threshold that is no longer displaced, or declared distances "as published" | `[]` |
