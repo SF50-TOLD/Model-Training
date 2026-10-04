@@ -65,7 +65,10 @@ def _semantic_problems(extraction: dict):
     if extraction["isCanceled"] and effects:
         yield Problem("effects", "A cancelled NOTAM has no effects")
     seen = set()
+    closed = _fully_closed_directions(effects)
     for index, effect in enumerate(effects):
+        if _directions(effect["runway"]) & closed and _shortens(effect):
+            yield Problem(f"effects[{index}]", "A fully closed runway takes no shortening; remove this effect")
         yield from _effect_problems(f"effects[{index}]", effect)
         key = json.dumps(effect, sort_keys=True)
         if key in seen:
@@ -81,6 +84,20 @@ def _combinable(first: dict, second: dict) -> bool:
     """Two effects that state different facts, which therefore belong in one effect for their runway."""
     both_closed = first["closure"] != "none" and second["closure"] != "none"
     return not both_closed and not any(first[f] is not None and second[f] is not None for f in _FACT_FIELDS)
+
+
+def _directions(runway: str | None) -> set[str]:
+    return set(runway.split("/")) if runway else set()
+
+
+def _fully_closed_directions(effects: list[dict]) -> set[str]:
+    return set().union(*(_directions(e["runway"]) for e in effects if e["closure"] == "full"))
+
+
+def _shortens(effect: dict) -> bool:
+    return effect["closure"] == "partial" or any(
+        effect[f] is not None for f in ("thresholdDisplacement", "declaredDistances")
+    )
 
 
 def _is_single_direction(runway: str | None) -> bool:
@@ -141,6 +158,8 @@ def _surface_problems(path: str, condition: dict):
 def _obstacle_problems(path: str, obstacle: dict):
     if all(value is None for value in obstacle.values()):
         yield Problem(path, "Obstacle states nothing; use null")
+    if obstacle["distanceReference"] is not None and obstacle["distance"] is None:
+        yield Problem(f"{path}.distanceReference", "A reference needs a stated distance; use null")
     if (obstacle["latitude"] is None) != (obstacle["longitude"] is None):
         yield Problem(f"{path}.latitude", "Latitude and longitude come as a pair")
     for field in ("heightAGL", "heightMSL", "distance"):

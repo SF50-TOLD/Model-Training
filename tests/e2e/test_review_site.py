@@ -276,7 +276,6 @@ def test_an_obstacle_position_can_be_pasted_as_dms(review, gold_db):
     card.get_by_label("Obstacle").check()
     review.field("Height AGL", card).get_by_label("Stated").check()
     card.get_by_role("spinbutton", name="Height AGL").fill("100")
-    card.get_by_role("textbox", name="Distance from").fill("JFK")
     card.get_by_label("Paste a DMS position").fill("403906N0734931W")
     card.get_by_label("Paste a DMS position").press("Tab")
     expect(card.get_by_role("spinbutton", name="Latitude")).to_have_value("40.651667")
@@ -288,7 +287,7 @@ def test_an_obstacle_position_can_be_pasted_as_dms(review, gold_db):
     assert gold_db.reviews(MSN)[0]["extraction"] == extraction(
         effect(
             None,
-            obstacle=obstacle(heightAGL=length(100), distanceReference="JFK", latitude=40.651667, longitude=-73.825278),
+            obstacle=obstacle(heightAGL=length(100), latitude=40.651667, longitude=-73.825278),
         )
     )
 

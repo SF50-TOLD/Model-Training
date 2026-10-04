@@ -140,7 +140,7 @@ Remarks such as `RWYCC DOWNGRADED`, friction coefficients (`CRFI`, `MEASURED FRI
 | `heightAGL` | Length? | Height above ground: a height stated as `AGL`, or labelled `HEIGHT`/`HGT` without `AMSL`/`MSL`. |
 | `heightMSL` | Length? | Elevation above sea level: a height stated as `MSL` or `AMSL`, or labelled `ELEVATION`/`ELEV`. In the FAA `OBST` format `<n>FT (<n>FT AGL)`, the first height is MSL by that format's definition. `UNKNOWN` is `null`. |
 | `distance` | Distance? | The stated distance from the reference. |
-| `distanceReference` | string? | What the distance is measured from, as stated (`APCH END RWY 03L`, `ARP`, `JFK`, `TORA RWY 18C`). |
+| `distanceReference` | string? | What the distance is measured from, as stated (`APCH END RWY 03L`, `ARP`, `JFK`, `TORA RWY 18C`). `null` when `distance` is `null`. |
 | `bearingDegrees` | number? | A numeric bearing, when stated (`270 DEG`). Compass words (`WNW`) are not converted; they record `null`. |
 | `latitude`, `longitude` | number? | The stated DMS position converted to decimal degrees (north and east positive, 6 decimal places). Converting the notation counts as normalising the form, not deriving a fact. Always a pair. Q-line coordinates are the NOTAM's area of influence, not the obstacle's position, and are never used. |
 
@@ -166,7 +166,8 @@ Everything else gets `effects: []`.
 | Procedure minima, SID/STAR/IAP changes, circling restrictions | `[]` |
 | A runway fact given only as the reason (`DUE …`) for an out-of-scope change (`AUTH TO CIRCLING MINIMA ONLY … DUE THR DISPLACED`); a fact the text states in its own right is recorded | not recorded: the NOTAM that states the fact itself carries it; `[]` unless something else qualifies |
 | An obstacle named in an instrument approach procedure (IAP) or minima NOTAM (`IAP … TEMPORARY CRANE 809 MSL 1.36NM NW OF RWY 31`) | not recorded: approach obstacles are not takeoff obstacles; `[]` unless something else qualifies |
-| An obstacle named in an obstacle departure procedure (`ODP … TEMPORARY CRANE 4739 FT FROM DER`) | effect with `obstacle`: departure obstacles are takeoff obstacles |
+| A temporary obstacle an obstacle departure procedure adds (`ODP … TEMPORARY CRANE 4739 FT FROM DER`) | effect with `obstacle`: departure obstacles are takeoff obstacles |
+| A list of published obstacles in an ODP's takeoff minimum notes (`TAKEOFF OBSTACLE NOTES: TREE … FROM DER …, TREE …`) | not recorded |
 | An obstacle that exists only under a stated condition (`OBST EXISTS ONLY WHEN RAISED`) | not recorded |
 | An obstacle in an en-route obstacle list (`REF AIP ENR 5.4`, low-flying-zone or vertical-obstacle lists) | not recorded: it is not in an aerodrome environment; `[]` unless something else qualifies |
 | Aerodrome or service hours, ATC, fuel, customs | `[]` |
@@ -177,6 +178,7 @@ Everything else gets `effects: []`.
 | A runway closed to a class of aircraft that includes the SF50 (`CLSD TO JET TFC`, `CLSD TO FIXED WING ACFT`) | `closure: "full"` |
 | A runway closed with exceptions that include the SF50 (`CLSD EXC ACFT WINGSPAN LESS THAN 79FT`) | `[]`: in effect, closed only to a class that excludes the SF50 |
 | A runway closed with other exceptions (`CLSD EXC PPR`) | `closure: "full"` |
+| A runway fully closed to the SF50 that the NOTAM also shortens (`RWY 10/28 FIRST 300M CLSD … RWY 10/28 AVBL FOR HEL ONLY`, `RWY 10/28 NOT AVBL DUE WIP FOR THR 28 DISPLACEMENT`) | only the full closure: no partial closure, displacement or declared distances for its directions |
 | A runway or portion closed only at stated times within the NOTAM's validity (`CLSD DLY 2200-0600`, `CLSD AFTER LAST SKED FLT`, `CLSD MON-FRI 0800-1600`) | not a closure; `[]` unless something else qualifies |
 | Takeoff or landing not available in one direction only (`LDG RWY 16R NOT AVBL`) | not a closure; `[]` unless something else qualifies |
 | "Effective operating length", "available length" or "remaining" figures that aren't labelled as declared distances | not recorded |

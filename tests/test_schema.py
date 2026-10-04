@@ -60,6 +60,8 @@ def test_missing_keys_are_schema_errors():
             "effects[1]",
         ),
         (extraction(effect("9R", "full")), "effects[0].runway"),
+        (extraction(effect("04/22", "full"), effect("22", thresholdDisplacement=length(615))), "effects[1]"),
+        (extraction(effect(obstacle=obstacle(distanceReference="THR 04R"))), "effects[0].obstacle.distanceReference"),
         (extraction(effect(surfaceCondition=surface([7, 5, 5]))), "effects[0].surfaceCondition.rwyCC[0]"),
     ],
 )
