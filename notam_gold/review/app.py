@@ -17,7 +17,7 @@ from notam_gold.export import split_of
 from notam_gold.labeling import evidence_problems
 from notam_gold.prompt import build_prompt
 from notam_gold.review.queue import review_order
-from notam_gold.reviews import stale_reviews
+from notam_gold.reviews import UNREVIEWED_REVIEWER_PREFIX, stale_reviews
 from notam_gold.schema import canonicalize, schema, validate
 from notam_gold.strata import ALL_STRATA
 
@@ -80,7 +80,8 @@ def _current_review(connection: sqlite3.Connection, key: str) -> dict | None:
 
 QUEUE_SQL = """
 SELECT notam.id AS key, notam.notam_id, notam.icao_location, notam.selected_stratum, notam.strata,
-       COALESCE(disagreement.score, 0) AS score, current_review.status AS status
+       COALESCE(disagreement.score, 0) AS score, current_review.status AS status,
+       current_review.reviewer AS reviewer
 FROM notam
 LEFT JOIN disagreement ON disagreement.notam_key = notam.id
 LEFT JOIN current_review ON current_review.notam_key = notam.id
@@ -90,7 +91,12 @@ OPEN_STATUSES = ("unreviewed", "stale")
 
 
 def _queue_status(row: sqlite3.Row, stale: dict) -> str:
-    return "stale" if row["key"] in stale else row["status"] or "unreviewed"
+    """A placeholder review that no person made leaves its NOTAM unreviewed."""
+    if row["key"] in stale:
+        return "stale"
+    if row["status"] is None or row["reviewer"].startswith(UNREVIEWED_REVIEWER_PREFIX):
+        return "unreviewed"
+    return row["status"]
 
 
 def create_app(database: Path, reviewer: str, half_of: Callable[[str], str | None] = split_of) -> FastAPI:

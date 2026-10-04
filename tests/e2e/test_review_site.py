@@ -327,6 +327,15 @@ def test_help_overlay_opens_and_closes(review):
     expect(help_dialog).to_be_hidden()
 
 
+def test_shortcuts_work_after_picking_a_closure_and_arrows_never_change_it(review, gold_db):
+    review.go_to(ORD)
+    review.choose_closure("partial", review.effect(1))
+    review.press("ArrowDown")
+    review.press("s")
+    review.expect_on(after(ORD))
+    assert gold_db.reviews(ORD)[-1]["extraction"]["effects"][0]["closure"] == "partial"
+
+
 def test_shortcuts_do_not_fire_while_typing(review, gold_db):
     review.go_to(SFO)
     review.press("n")

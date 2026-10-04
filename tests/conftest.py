@@ -51,11 +51,11 @@ class GoldDatabase:
             (key, label_a, label_b, db.dumps([d.to_dict() for d in differences]), score(differences)),
         )
 
-    def add_review(self, key, status, extraction, silver_id=None, edited=False, reviewed_at=None):
+    def add_review(self, key, status, extraction, silver_id=None, edited=False, reviewed_at=None, reviewer="Tester"):
         self.connection.execute(
             "INSERT INTO review (notam_key, silver_label_id, reviewer, reviewed_at, status, extraction, note, edited)"
-            " VALUES (?, ?, 'Tester', ?, ?, ?, NULL, ?)",
-            (key, silver_id, reviewed_at or db.now(), status, db.dumps(extraction), int(edited)),
+            " VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+            (key, silver_id, reviewer, reviewed_at or db.now(), status, db.dumps(extraction), int(edited)),
         )
 
     def reviews(self, key) -> list[dict]:

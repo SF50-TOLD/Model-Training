@@ -40,3 +40,11 @@ def test_rejects_invalid_labels_but_keeps_ambiguous_ones(client):
 def test_pages_and_scripts_are_revalidated_on_every_load(client):
     for path in ("/", "/static/app.js", "/api/progress"):
         assert client.get(path).headers["cache-control"] == "no-cache"
+
+
+def test_a_placeholder_review_leaves_its_notam_in_the_unreviewed_queue(client, gold_db, silver):
+    gold_db.add_review("KSFO A1/2026", "accepted", silver, reviewer="Unreviewed: run A silver label")
+    gold_db.connection.commit()
+    assert [item["status"] for item in client.get("/api/queue").json()["items"]] == ["unreviewed"]
+    review(client, "accepted", silver)
+    assert [item["status"] for item in client.get("/api/queue").json()["items"]] == ["accepted"]

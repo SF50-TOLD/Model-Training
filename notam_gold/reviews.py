@@ -5,6 +5,9 @@ import sqlite3
 from notam_gold import db
 from notam_gold.disagreement import Difference, diff
 
+# Reviews recorded under a reviewer starting with this hold a silver label no person has checked.
+UNREVIEWED_REVIEWER_PREFIX = "Unreviewed:"
+
 STALE_SQL = """
 SELECT review.notam_key, review.extraction AS reviewed, silver.extraction AS silver
 FROM current_review AS review

@@ -104,6 +104,12 @@ function setAt(root, path, value) {
   parent[keys.at(-1)] = value;
 }
 
+/** Whether keys typed at `element` are text, so single-letter shortcuts must leave them alone. */
+function isTextEntry(element) {
+  if (["TEXTAREA", "SELECT"].includes(element.tagName)) return true;
+  return element.tagName === "INPUT" && !["radio", "checkbox"].includes(element.type);
+}
+
 /** Whether `path` is `prefix` itself or a field or item inside it. */
 function isWithin(path, prefix) {
   return path === prefix || path.startsWith(prefix + ".") || path.startsWith(prefix + "[");
@@ -382,7 +388,11 @@ document.addEventListener("alpine:init", () => {
     },
 
     onKey(event) {
-      const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
+      if (event.target.type === "radio" && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+        event.preventDefault();
+        return;
+      }
+      const typing = isTextEntry(event.target);
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         this.save();
