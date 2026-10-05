@@ -7,6 +7,9 @@ rather than values. It trains in seconds on the silver-labelled training set and
 reviewed gold and held-out sets; a missed NOTAM still appears in the app's list, only lower, so the
 gate is on recall.
 
+Apron, stand and de-icing pad closures are scarce in the labelled set, so training adds corpus
+NOTAMs of that kind labelled not relevant by rule (``is_apron_closure``).
+
 The app reproduces ``features`` exactly: tokens are runs of ``A-Z`` and ``#`` or any other single
 non-space character of the upper-cased, whitespace-collapsed text; each feature's name is hashed
 with 64-bit FNV-1a over its UTF-8 bytes, modulo the dimension; a feature's value is ``1 + ln(count)``,
@@ -27,20 +30,28 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from notam_gold import corpus
+from notam_gold.paths import CORPUS
 from training.paths import DATASET_DIR
 
 DIMENSION = 1 << 18
-THRESHOLD = 0.2
+THRESHOLD = 0.15
 RECALL_GATE = 0.97
 EPOCHS = 12
 LEARNING_RATE = 0.1
 L2 = 1e-6
 SEED = 7
-VERSION = 1
+VERSION = 2
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _TOKEN = re.compile(r"[A-Z#]+|[^\sA-Z#]")
 _FNV_OFFSET, _FNV_PRIME, _MASK = 0xCBF29CE484222325, 0x100000001B3, (1 << 64) - 1
 EVAL_SPLITS = ("dev", "test", "holdout")
+RULE_NEGATIVES = 1500
+_APRON_SUBJECT = re.compile(r"^(?:[A-Z0-9]{3,4}\s+)?(?:APRON|APN|RAMP|STANDS?|SPOTS?|PARKING|DE-?ICE|PAD)\b")
+_RUNWAY_FACT = re.compile(
+    r"\bRWY\s*\d{1,2}[LCR]?(?:\s*/\s*\d{1,2}[LCR]?)?\s+(?:CLSD|CLOSED|NOT AVBL|FICON|DTHR|THR)"
+    r"|\b(?:FICON|RSC|SNOWTAM|OBST|CRANE|TORA|LDA|DECLARED|HGT|AGL|AMSL)\b"
+)
 
 
 def fnv1a64(text: str) -> int:
@@ -81,6 +92,35 @@ def features(text: str, dimension: int = DIMENSION) -> dict[int, float]:
 
 def is_relevant(extraction: dict) -> bool:
     return not extraction["isCanceled"] and bool(extraction["effects"] or extraction["obstacles"])
+
+
+def is_apron_closure(text: str) -> bool:
+    """Whether the NOTAM's subject is an apron, ramp, stand, spot or de-icing pad, and it states no runway fact.
+
+    The schema records none of these, so they are labelled not relevant by rule; a runway named only
+    as a location (`DEICE PAD FOR RWY 03L`) doesn't make them relevant. Taxiway closures are left out:
+    their phrasing (`CLSD BTN TWY C AND TWY D`) is shared with real partial runway closures.
+    """
+    normalized = " ".join(text.upper().split())
+    return bool(_APRON_SUBJECT.match(normalized)) and not _RUNWAY_FACT.search(normalized)
+
+
+def rule_negatives(records, excluded: set[str], limit: int = RULE_NEGATIVES) -> list[str]:
+    """Up to ``limit`` corpus texts labelled not relevant by rule, one per phrasing.
+
+    Texts that differ only in their numbers have the same features, so one of them stands for all.
+
+    Texts in ``excluded`` (the reviewed sets) are left out, and those that name a runway come first,
+    since those are the ones the classifier confuses.
+    """
+    by_phrasing: dict[tuple, str] = {}
+    for record in records:
+        text = record["notam_text"]
+        if " ".join(text.split()) in excluded or not is_apron_closure(text):
+            continue
+        by_phrasing.setdefault(tuple(tokens(text)), text)
+    ranked = sorted(by_phrasing.values(), key=lambda t: ("RWY" not in t.upper(), fnv1a64(t)))
+    return ranked[:limit]
 
 
 def _sigmoid(z: float) -> float:
@@ -138,6 +178,15 @@ def training_examples(directory: Path = DATASET_DIR) -> tuple[list[str], list[in
     return texts, labels
 
 
+def evaluated_texts(eval_dir: Path) -> set[str]:
+    """Whitespace-collapsed texts of every reviewed NOTAM, which training must never see."""
+    texts = set()
+    for split in (*EVAL_SPLITS, "gold"):
+        for line in (eval_dir / f"notam_{split}.jsonl").read_text(encoding="utf-8").splitlines():
+            texts.add(" ".join(_notam_text(json.loads(line)["input"]["prompt"]).split()))
+    return texts
+
+
 def scores(model: Model, samples: Path) -> dict:
     """Recall and precision at the model's threshold, and the relevant NOTAMs it misses."""
     rows = [json.loads(line) for line in samples.read_text(encoding="utf-8").splitlines()]
@@ -184,9 +233,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--eval-dir", type=Path, default=Path("eval"))
+    parser.add_argument("--rule-negatives", type=int, default=RULE_NEGATIVES, help="apron, stand and pad closures")
     args = parser.parse_args()
     texts, labels = training_examples()
-    print(f"Training on {len(texts):,} NOTAMs, {sum(labels):,} relevant")
+    negatives = rule_negatives(corpus.read_jsonl_gz(CORPUS), evaluated_texts(args.eval_dir), args.rule_negatives)
+    texts, labels = texts + negatives, labels + [0] * len(negatives)
+    print(f"Training on {len(texts):,} NOTAMs, {sum(labels):,} relevant, {len(negatives):,} rule-labelled negatives")
     model = train(texts, labels).as_float32()
     passed = True
     for split in EVAL_SPLITS:
