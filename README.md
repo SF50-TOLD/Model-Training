@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.14-blue.svg)](setup.sh)
 
-This repo builds a human-reviewed gold set of NOTAM extractions. The set measures how accurately the SF50 TOLD app's on-device model reads runway-performance data from raw NOTAM text.
+This repo builds human-reviewed sets of NOTAM extractions, and trains the classifier that orders the SF50 TOLD app's NOTAM list by whether each NOTAM affects runway performance.
 
-On iOS 27, the app uses Apple's stock Foundation Models model. The model *proposes* runway effects from a NOTAM, and the pilot confirms them. Before that ships, the app's Evaluations harness scores the model against the labels in [`eval/`](eval/). Every label there has been reviewed by a person.
+The app reads formatted reports (FICON, RSC, SNOWTAM, FAA OBST) with deterministic parsers, and lists every downloaded NOTAM for the pilot. The relevance classifier puts the NOTAMs that matter for takeoff and landing first. The reviewed sets in [`eval/`](eval/) score both the parsers and the classifier; every label there has been reviewed by a person.
 
 ```text
 [NOTAM API] → corpus → strata → gold candidates → silver labels (2 runs) → human review → eval/
@@ -171,11 +171,12 @@ The test half stays honest only while nobody tunes against it. Once it has gated
 
 Candidates come from the NOTAMs `--holdout` collected, which are newer than the corpus. A stratum they can't fill takes the rest from the [Zenodo dataset 17208970](https://zenodo.org/records/17208970) (CC BY 4.0), downloaded to `data/external/zenodo-17208970/`. Zenodo NOTAMs are rewritten into the text the NOTAM API serves. No candidate shares a reissue template with the corpus, and training selection excludes every held-out candidate, as it does gold. The held-out set has no halves: all of it is for the accuracy gate.
 
-## The training set
+## The relevance classifier
 
-Models trained here learn from silver-labelled corpus NOTAMs. Training data never includes a gold
-NOTAM, its reissues, or its text, and nothing from `eval/notam_dev.jsonl` or
-`eval/notam_test.jsonl`. Run these steps from the repository root.
+The classifier learns from silver-labelled corpus NOTAMs: a NOTAM is relevant when its label states
+a runway effect or an obstacle. Training data never includes a gold NOTAM, its reissues, or its
+text, and nothing from `eval/notam_dev.jsonl` or `eval/notam_test.jsonl`. Run these steps from the
+repository root.
 
 1. `swift run -c release --package-path ../iOS/NOTAMModel notam-corpus < <(gzip -dc data/corpus.jsonl.gz) > data/parsed.jsonl`
    lists the NOTAMs the app's parsers read, which are left out.
@@ -185,6 +186,9 @@ NOTAM, its reissues, or its text, and nothing from `eval/notam_dev.jsonl` or
    them in synchronous chunks sized so the worst case never passes the budget. Strata where run A
    alone erred on reviewed gold get both runs and keep only agreements.
 4. `python -m training.build_dataset` writes `data/training/{train,val}.jsonl`.
+5. `python -m training.relevance --out data/models/relevance` trains a logistic regression over hashed
+   n-grams of the NOTAM text, gates it on recall over the reviewed sets (a missed NOTAM still appears,
+   only lower), and writes its weights, a manifest and a parity file the app's Swift port tests against.
 
 ## Tests
 
