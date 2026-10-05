@@ -323,7 +323,12 @@ def migrate_reviews(connection: sqlite3.Connection, dry_run: bool) -> MigrationR
 def _append_review(
     connection: sqlite3.Connection, row: sqlite3.Row, migrated: dict, notes: list[Note], flagged: list[Note]
 ):
-    reviewer = f"{FLAGGED_REVIEWER} {', '.join(note.path for note in flagged)}" if flagged else MIGRATION_REVIEWER
+    if flagged:
+        reviewer = f"{FLAGGED_REVIEWER} {', '.join(note.path for note in flagged)}"
+    elif row["reviewer"].startswith(UNREVIEWED_REVIEWER_PREFIX):
+        reviewer = f"{UNREVIEWED_REVIEWER_PREFIX} migrated to schema 2.0.0 by rule"
+    else:
+        reviewer = MIGRATION_REVIEWER
     migration_note = "Schema 2.0.0 migration: " + "; ".join(f"{note.path}: {note.message}" for note in notes)
     note = "\n".join(filter(None, [row["note"], migration_note if notes else None]))
     connection.execute(

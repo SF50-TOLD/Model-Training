@@ -230,3 +230,11 @@ def test_migrating_reviews_appends_a_row_per_current_review_and_queues_the_flagg
     assert migrated_flagged["reviewer"].startswith(UNREVIEWED_REVIEWER_PREFIX)
     assert "effects[0].closure" in migrated_flagged["note"]
     assert (migrated_flagged["status"], migrated_flagged["edited"]) == ("edited", 1)
+
+
+def test_migrating_a_placeholder_review_keeps_it_unreviewed(gold_db):
+    key = gold_db.add_notam("A3/2026", text="RWY 28L CLSD")
+    gold_db.add_review(key, "accepted", old_extraction(old_effect("28L", "full")), reviewer="Unreviewed: run A silver")
+    gold_db.connection.commit()
+    migrate.migrate_reviews(gold_db.connection, dry_run=False)
+    assert gold_db.reviews(key)[-1]["reviewer"].startswith(UNREVIEWED_REVIEWER_PREFIX)

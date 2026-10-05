@@ -6,6 +6,7 @@ requests (``batch_id`` null). Results are stored in ``silver_label`` rows,
 which are never modified.
 """
 
+import copy
 import hashlib
 import itertools
 import json
@@ -72,8 +73,14 @@ def output_schema() -> dict:
     """The labeler's structured-output schema: the extraction plus evidence and a note.
 
     Structured outputs reject numeric bounds, so they are stripped here and enforced by ``validate``.
+    The choices for a closed end and an obstacle direction (a relative end, a compass point, a runway
+    end or a bearing) compile to a grammar larger than structured outputs accept, so on the wire they
+    are plain values, and ``validate`` enforces the choices.
     """
     extraction = {k: v for k, v in schema().items() if k not in ("$schema", "$id", "schemaVersion", "$defs")}
+    definitions = copy.deepcopy(schema()["$defs"])
+    definitions["PartialClosure"]["properties"]["end"] = {"type": ["string", "null"]}
+    definitions["Obstacle"]["properties"]["direction"] = {"type": ["string", "number", "null"]}
     evidence = {
         "type": "object",
         "additionalProperties": False,
@@ -90,7 +97,7 @@ def output_schema() -> dict:
                 "evidence": {"type": "array", "items": evidence},
                 "note": {"type": ["string", "null"]},
             },
-            "$defs": schema()["$defs"] | {"NOTAMExtraction": extraction},
+            "$defs": definitions | {"NOTAMExtraction": extraction},
         }
     )
 
