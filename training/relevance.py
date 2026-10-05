@@ -46,6 +46,9 @@ _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _TOKEN = re.compile(r"[A-Z#]+|[^\sA-Z#]")
 _FNV_OFFSET, _FNV_PRIME, _MASK = 0xCBF29CE484222325, 0x100000001B3, (1 << 64) - 1
 EVAL_SPLITS = ("dev", "test", "holdout")
+# The one reviewed set whose individual misses may be read; the others stay aggregate-only, so tuning
+# never sees them.
+TUNING_SPLIT = "dev"
 RULE_NEGATIVES = 1500
 _APRON_SUBJECT = re.compile(r"^(?:[A-Z0-9]{3,4}\s+)?(?:APRON|APN|RAMP|STANDS?|SPOTS?|PARKING|DE-?ICE|PAD)\b")
 _RUNWAY_FACT = re.compile(
@@ -248,8 +251,9 @@ def main():
             f"{split:<8} {result['count']:>4} NOTAMs, {result['relevant']:>4} relevant: "
             f"recall {result['recall']:.3f}, precision {result['precision']:.3f}"
         )
-        for miss in result["misses"]:
-            print(f"    missed: {miss}")
+        if split == TUNING_SPLIT:
+            for miss in result["misses"]:
+                print(f"    missed: {miss}")
     if not passed:
         raise SystemExit(f"Recall is below {RECALL_GATE} on a reviewed set; not exporting.")
     parity = [_notam_text(json.loads(line)["input"]["prompt"]) for line in (args.eval_dir / "notam_dev.jsonl").open()]
