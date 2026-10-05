@@ -15,7 +15,22 @@ On iOS 27, the app uses Apple's stock Foundation Models model. The model *propos
 
 [`schema/notam_extraction.schema.json`](schema/notam_extraction.schema.json) is the extraction schema, and [`schema/SCHEMA.md`](schema/SCHEMA.md) gives the rule for every field, with worked examples. The app mirrors the schema as a `@Generable` Swift struct. Any change to it is a cross-repo change.
 
-The core rule: **a label records only what the NOTAM text states**. An absent fact is `null`, and the evaluation scores that `null`. Units and designators are recorded as written. The app does all derivation (shortening, per-direction effects, contamination categories) itself.
+The schema records what the app needs to answer three questions about a runway direction: is it closed for takeoff or landing, what stated length or displacement shortens it, and is there an aerodrome obstacle whose height and distance from a runway end are knowable. Surface condition is kept for the deterministic parsers' sake.
+
+The core rule: **a label records only what the NOTAM text states**. An absent fact is `null`, and the evaluation scores that `null`. Units and designators are recorded as written. The app does all derivation (shortening, contamination categories, which obstacle lies ahead of a takeoff) itself.
+
+### Schema migration
+
+Stored labels are never rewritten. Every reader converts a label saved under an earlier schema to the current one as it reads it (`notam_gold/migrate.py`). To bring the reviewed sets forward after a schema change:
+
+```bash
+./migrate_schema.py --dry-run             # what the gold set's reviews would become
+./migrate_schema.py --keys-out needs.txt  # append a current-schema review per NOTAM
+./migrate_schema.py --holdout             # the same for the held-out set
+./migrate_schema.py --training            # report on the training set's silver labels
+```
+
+A NOTAM whose new meaning the old label can't settle (a closure the text limits to one operation, an obstacle reference or direction read from the text) comes back as unreviewed, with the reasons in its note. Relabelling just those (`./label_silver.py run A --keys needs.txt`) then marks the ones a person must look at as **Needs re-review**.
 
 ## Setup
 
@@ -101,7 +116,7 @@ The review app shows one NOTAM per screen:
 - **Disagreements:** fields where run B disagreed are shown in amber, with run B's value alongside.
 
 | Key | Action |
-|---|---|
+| --- | --- |
 | `A` | Accept |
 | `S` / ⌘↵ | Save edits |
 | `M` | Mark ambiguous (kept, but excluded from the gold set) |

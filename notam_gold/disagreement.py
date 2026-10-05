@@ -4,12 +4,13 @@ from dataclasses import dataclass
 
 from notam_gold.schema import canonicalize
 
-HEAVY_FIELDS = ("isCanceled", "closure", "closedLength", "thresholdDisplacement", "declaredDistances")
+# Safety-critical fields: a disagreement under one of these doubles the review priority.
+HEAVY_FIELDS = ("closure", "partialClosure", "partialClosure.length", "thresholdDisplacement", "declaredDistances")
 
 
 @dataclass(frozen=True)
 class Difference:
-    """One disagreeing path, indexed like extraction A (``effects[B:j]`` for effects only B has)."""
+    """One disagreeing path, indexed like extraction A (``effects[B:j]`` for items only B has)."""
 
     path: str
     a: object
@@ -19,20 +20,26 @@ class Difference:
         return {"path": self.path, "a": self.a, "b": self.b}
 
 
-def _align(effects_a: list[dict], effects_b: list[dict]) -> tuple[list[tuple[int, int]], list[int], list[int]]:
-    """Pair effects by runway designator (preferring equal closure), then by order."""
-    unmatched_b = list(range(len(effects_b)))
+def _align(items_a: list[dict], items_b: list[dict], key) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    """Pair items with the same ``key``, each at most once, in order."""
+    unmatched_b = list(range(len(items_b)))
     pairs, only_a = [], []
-    for i, effect in enumerate(effects_a):
-        same_runway = [j for j in unmatched_b if effects_b[j]["runway"] == effect["runway"]]
-        same_closure = [j for j in same_runway if effects_b[j]["closure"] == effect["closure"]]
-        match = (same_closure or same_runway or [None])[0]
+    for i, item in enumerate(items_a):
+        match = next((j for j in unmatched_b if key(items_b[j]) == key(item)), None)
         if match is None:
             only_a.append(i)
         else:
             pairs.append((i, match))
             unmatched_b.remove(match)
     return pairs, only_a, unmatched_b
+
+
+def _runway(effect: dict):
+    return effect["runway"]
+
+
+def _referenced_runway(obstacle: dict):
+    return (obstacle["reference"] or {}).get("runway")
 
 
 def _compare(a, b, path: str):
@@ -44,27 +51,32 @@ def _compare(a, b, path: str):
         yield Difference(path, a, b)
 
 
-def _canonical_contaminants(effect: dict) -> dict:
-    return canonicalize({"isCanceled": False, "effects": [effect]})["effects"][0]
+def _section(a: dict, b: dict, name: str, key) -> list[Difference]:
+    pairs, only_a, only_b = _align(a[name], b[name], key)
+    differences = []
+    for i, j in pairs:
+        differences += _compare(a[name][i], b[name][j], f"{name}[{i}]")
+    differences += [Difference(f"{name}[{i}]", a[name][i], None) for i in only_a]
+    differences += [Difference(f"{name}[B:{j}]", None, b[name][j]) for j in only_b]
+    return differences
 
 
 def diff(a: dict, b: dict) -> list[Difference]:
     """Every path at which extractions ``a`` and ``b`` disagree."""
+    a, b = canonicalize(a), canonicalize(b)
     differences = []
     if a["isCanceled"] != b["isCanceled"]:
         differences.append(Difference("isCanceled", a["isCanceled"], b["isCanceled"]))
-    pairs, only_a, only_b = _align(a["effects"], b["effects"])
-    for i, j in pairs:
-        left, right = (_canonical_contaminants(x["effects"][k]) for x, k in ((a, i), (b, j)))
-        differences += _compare(left, right, f"effects[{i}]")
-    differences += [Difference(f"effects[{i}]", a["effects"][i], None) for i in only_a]
-    differences += [Difference(f"effects[B:{j}]", None, b["effects"][j]) for j in only_b]
+    differences += _section(a, b, "effects", _runway)
+    differences += _section(a, b, "obstacles", _referenced_runway)
     return sorted(differences, key=lambda d: d.path)
 
 
 def _is_heavy(difference: Difference) -> bool:
-    whole_effect = "." not in difference.path and difference.path != "isCanceled"
-    return whole_effect or any(field in difference.path for field in HEAVY_FIELDS)
+    if "." not in difference.path:
+        return True
+    field = difference.path.split("].", 1)[1]
+    return any(field == heavy or field.startswith(f"{heavy}.") and heavy != "partialClosure" for heavy in HEAVY_FIELDS)
 
 
 def score(differences: list[Difference]) -> int:

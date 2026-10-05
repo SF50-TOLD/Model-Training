@@ -2,7 +2,18 @@
 
 from playwright.sync_api import Page, expect
 
-from tests.factories import contaminant, declared, effect, extraction, length, obstacle, surface
+from tests.factories import (
+    contaminant,
+    declared,
+    effect,
+    extraction,
+    height,
+    length,
+    obstacle,
+    partial,
+    reference,
+    surface,
+)
 
 SFO = "KSFO A1/2026"
 DTW = "KDTW A2/2026"
@@ -23,13 +34,15 @@ def after(key: str) -> str:
     return QUEUE[QUEUE.index(key) + 1]
 
 
-SFO_LABEL = extraction(
-    effect("28L", declaredDistances=declared(length(10810), length(10810), length(10981), length(10275)))
-)
-
+SFO_LABEL = extraction(effect("28L", declaredDistances=declared(length(10810), length(10275))))
 
 ORD_OLD_RULES = extraction()
-ORD_NEW_RULES = extraction(effect("10L/28R", "full"))
+ORD_NEW_RULES = extraction(effect("10L", "both"), effect("28R", "both"))
+
+LIRR_RUN_B = extraction(
+    effect("16", "landing"),
+    obstacles=[obstacle(height(60, "m"), length(0.5, "nm"), reference("ARP"), "WNW")],
+)
 
 
 def seed(gold_db):
@@ -52,8 +65,8 @@ def seed(gold_db):
     gold_db.add_disagreement(key, a, b, SFO_LABEL, SFO_LABEL)
 
     key = gold_db.add_notam("A2/2026", "KDTW", "DTW RWY 09R/27L W 1713FT CLSD.", stratum="partial_closure", rank=1)
-    label_a = extraction(effect("09R/27L", "partial", closedLength=length(1713), closedEnd="W"))
-    label_b = extraction(effect("09R/27L", "partial", closedLength=length(1700), closedEnd="W"))
+    label_a = extraction(*(effect(r, partialClosure=partial(length(1713), "W")) for r in ("09R", "27L")))
+    label_b = extraction(*(effect(r, partialClosure=partial(length(1700), "W")) for r in ("09R", "27L")))
     gold_db.add_disagreement(
         key, gold_db.add_silver(key, label_a), gold_db.add_silver(key, label_b, run="B"), label_a, label_b
     )
@@ -69,9 +82,7 @@ def seed(gold_db):
     key = gold_db.add_notam(
         "A4/2026", "PAJN", "RWY 08 FICON 5/5/5 100 PCT WET OBS AT 2609211244.", stratum="ficon_rwycc", rank=3
     )
-    gold_db.add_silver(
-        key, extraction(effect("08", surfaceCondition=surface([5, 5, 5], [contaminant("wet", None, 100)])))
-    )
+    gold_db.add_silver(key, extraction(effect("08", surfaceCondition=surface([5, 5, 5], [contaminant("wet", 100)]))))
 
     key = gold_db.add_notam(
         "A5/2026", "KTPA", "A5/26 NOTAMC A4/26\nE) TPA RWY 01L/19R CLSD\nCANCELED", "C", "cancelled", rank=4
@@ -81,14 +92,18 @@ def seed(gold_db):
     gold_db.add_notam("A6/2026", "KMSN", "RWY 14 PAPI U/S", "C", "plausible_negative", rank=5)
 
     key = gold_db.add_notam(
-        "A7/2026", "LIRR", "NEW OBST ERECTED: TOWER 60M AGL; MAST 45M AGL", stratum="obstacle", rank=6
-    )
-    label_b = extraction(
-        effect(None, obstacle=obstacle(heightAGL=length(60, "m"))),
-        effect(None, obstacle=obstacle(heightAGL=length(45, "m"))),
+        "A7/2026",
+        "LIRR",
+        "RWY 16 CLSD FOR LDG. NEW OBST ERECTED: TOWER 60M AGL 0.5NM WNW OF ARP",
+        stratum="obstacle",
+        rank=6,
     )
     gold_db.add_disagreement(
-        key, gold_db.add_silver(key, extraction()), gold_db.add_silver(key, label_b, run="B"), extraction(), label_b
+        key,
+        gold_db.add_silver(key, extraction()),
+        gold_db.add_silver(key, LIRR_RUN_B, run="B"),
+        extraction(),
+        LIRR_RUN_B,
     )
     key = gold_db.add_notam("A8/2026", "KORD", "ORD RWY 10L/28R CLSD", stratum="full_closure", rank=7)
     gold_db.add_silver(key, ORD_OLD_RULES, created_at="2026-09-24T20:00:00+00:00")
@@ -150,6 +165,9 @@ class ReviewPage:
 
     def effect(self, number: int):
         return self.page.locator("fieldset.effect").nth(number - 1)
+
+    def obstacle(self, number: int):
+        return self.page.locator("fieldset.obstacle").nth(number - 1)
 
     def field(self, name: str, within=None):
         return (within or self.page).locator(".field", has=self.page.get_by_text(name, exact=True))

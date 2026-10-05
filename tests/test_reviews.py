@@ -4,7 +4,22 @@ from notam_gold.reviews import stale_reviews
 from tests.factories import effect, extraction, length
 
 OLD_RULES = extraction(effect("06", thresholdDisplacement=length(300)))
-NEW_RULES = extraction(effect("06", "full", thresholdDisplacement=length(300)))
+NEW_RULES = extraction(effect("06", "landing", thresholdDisplacement=length(300)))
+OLD_SHAPE = {
+    "isCanceled": False,
+    "effects": [
+        {
+            "runway": "06",
+            "closure": "none",
+            "closedLength": None,
+            "closedEnd": None,
+            "thresholdDisplacement": length(300),
+            "declaredDistances": None,
+            "surfaceCondition": None,
+            "obstacle": None,
+        }
+    ],
+}
 
 BEFORE, REVIEWED, AFTER = "2026-09-24T20:00:00+00:00", "2026-09-24T21:00:00+00:00", "2026-09-25T09:00:00+00:00"
 
@@ -21,7 +36,7 @@ def test_a_review_the_relabel_disagrees_with_is_stale(gold_db, relabelled):
     gold_db.add_review(relabelled, "accepted", OLD_RULES, reviewed_at=REVIEWED)
     gold_db.add_silver(relabelled, NEW_RULES, created_at=AFTER)
     [difference] = stale_reviews(gold_db.connection)[relabelled]
-    assert (difference.path, difference.a, difference.b) == ("effects[0].closure", "none", "full")
+    assert (difference.path, difference.a, difference.b) == ("effects[0].closure", "none", "landing")
 
 
 @pytest.mark.parametrize(
@@ -35,4 +50,11 @@ def test_a_review_the_relabel_disagrees_with_is_stale(gold_db, relabelled):
 def test_reviews_the_relabel_does_not_overtake_are_current(gold_db, relabelled, status, saved, reviewed_at):
     gold_db.add_review(relabelled, status, saved, reviewed_at=reviewed_at)
     gold_db.add_silver(relabelled, NEW_RULES, created_at=AFTER)
+    assert stale_reviews(gold_db.connection) == {}
+
+
+def test_a_silver_label_in_the_old_schema_is_compared_in_the_current_one(gold_db):
+    key = gold_db.add_notam("A2/2026")
+    gold_db.add_review(key, "accepted", OLD_RULES, reviewed_at=REVIEWED)
+    gold_db.add_silver(key, OLD_SHAPE, created_at=AFTER)
     assert stale_reviews(gold_db.connection) == {}

@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 from notam_gold import db, labeling
 from notam_gold.disagreement import diff, score
+from notam_gold.migrate import current
 from notam_gold.paths import DATABASE, HOLDOUT_DATABASE
 from notam_gold.prompt import build_prompt
 
@@ -135,7 +136,11 @@ def command_ingest(client, connection, args):
 
 
 def latest_labels(connection: sqlite3.Connection, run_name: str) -> dict[str, sqlite3.Row]:
-    rows = connection.execute("SELECT * FROM latest_silver WHERE run_name = ? AND extraction IS NOT NULL", (run_name,))
+    rows = connection.execute(
+        "SELECT latest_silver.*, notam.notam_text FROM latest_silver JOIN notam ON notam.id = notam_key"
+        " WHERE run_name = ? AND extraction IS NOT NULL",
+        (run_name,),
+    )
     return {row["notam_key"]: row for row in rows}
 
 
@@ -144,7 +149,8 @@ def command_disagreements(_client, connection, _args):
     with connection:
         connection.execute("DELETE FROM disagreement")
         for key in a.keys() & b.keys():
-            differences = diff(db.loads(a[key]["extraction"]), db.loads(b[key]["extraction"]))
+            text = a[key]["notam_text"]
+            differences = diff(*(current(db.loads(label[key]["extraction"]), text) for label in (a, b)))
             connection.execute(
                 "INSERT INTO disagreement VALUES (?, ?, ?, ?, ?)",
                 (key, a[key]["id"], b[key]["id"], db.dumps([d.to_dict() for d in differences]), score(differences)),

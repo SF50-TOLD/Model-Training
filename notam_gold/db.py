@@ -6,11 +6,15 @@ and the latest label from each named run (A or B) is that run's current label.
 """
 
 import json
+import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 from notam_gold.paths import DATABASE
+
+# Reviews recorded under a reviewer starting with this hold a label no person has checked.
+UNREVIEWED_REVIEWER_PREFIX = "Unreviewed:"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS notam (
@@ -119,3 +123,11 @@ def dumps(value) -> str | None:
 
 def loads(value: str | None):
     return None if value is None else json.loads(value)
+
+
+def back_up(path: Path = DATABASE):
+    """Copy the database into its ``backups`` folder, stamped with the time."""
+    if path.exists():
+        backups = path.parent / "backups"
+        backups.mkdir(exist_ok=True)
+        shutil.copy2(path, backups / f"{path.stem}-{datetime.now():%Y%m%dT%H%M%S}.sqlite")

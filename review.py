@@ -7,12 +7,11 @@ attributed to --reviewer, defaulting to `git config user.name`.
 """
 
 import argparse
-import shutil
 import subprocess
-from datetime import datetime
 
 import uvicorn
 
+from notam_gold.db import back_up
 from notam_gold.export import split_of
 from notam_gold.paths import DATABASE, HOLDOUT_DATABASE
 from notam_gold.review.app import create_app
@@ -21,13 +20,6 @@ from notam_gold.review.app import create_app
 def git_user() -> str | None:
     result = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, check=False)
     return result.stdout.strip() or None
-
-
-def back_up(database):
-    if database.exists():
-        backups = database.parent / "backups"
-        backups.mkdir(exist_ok=True)
-        shutil.copy2(database, backups / f"{database.stem}-{datetime.now():%Y%m%dT%H%M%S}.sqlite")
 
 
 def main():

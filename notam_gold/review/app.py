@@ -12,9 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from notam_gold import db
-from notam_gold.coords import parse_position
 from notam_gold.export import split_of
 from notam_gold.labeling import evidence_problems
+from notam_gold.migrate import current
 from notam_gold.prompt import build_prompt
 from notam_gold.review.queue import review_order
 from notam_gold.reviews import UNREVIEWED_REVIEWER_PREFIX, stale_reviews
@@ -22,7 +22,7 @@ from notam_gold.schema import canonicalize, schema, validate
 from notam_gold.strata import ALL_STRATA
 
 STATIC = Path(__file__).parent / "static"
-EMPTY_EXTRACTION = {"isCanceled": False, "effects": []}
+EMPTY_EXTRACTION = {"isCanceled": False, "effects": [], "obstacles": []}
 
 
 class ValidateRequest(BaseModel):
@@ -51,26 +51,34 @@ def _silver(connection: sqlite3.Connection, key: str, run_name: str) -> dict | N
     ).fetchone()
     if row is None:
         return None
+    extraction = db.loads(row["extraction"])
+    if extraction is not None:
+        extraction = current(extraction, row["notam_text"])
     return {
         "id": row["id"],
         "model": row["model"],
         "promptVersion": row["prompt_version"],
-        "extraction": db.loads(row["extraction"]),
+        "extraction": extraction,
         "evidence": db.loads(row["evidence"]),
         "note": row["note"],
         "problems": _current_problems(
-            db.loads(row["extraction"]), db.loads(row["evidence"]), row["notam_text"], db.loads(row["problems"])
+            extraction, db.loads(row["evidence"]), row["notam_text"], db.loads(row["problems"])
         ),
     }
 
 
 def _current_review(connection: sqlite3.Connection, key: str) -> dict | None:
-    row = connection.execute("SELECT * FROM current_review WHERE notam_key = ?", (key,)).fetchone()
+    row = connection.execute(
+        "SELECT current_review.*, notam.notam_text FROM current_review JOIN notam ON notam.id = notam_key"
+        " WHERE notam_key = ?",
+        (key,),
+    ).fetchone()
     if row is None:
         return None
+    extraction = db.loads(row["extraction"])
     return {
         "status": row["status"],
-        "extraction": db.loads(row["extraction"]),
+        "extraction": extraction if extraction is None else current(extraction, row["notam_text"]),
         "note": row["note"],
         "reviewer": row["reviewer"],
         "reviewedAt": row["reviewed_at"],
@@ -130,6 +138,10 @@ def create_app(database: Path, reviewer: str, half_of: Callable[[str], str | Non
         return {
             "closure": definitions["RunwayEffect"]["properties"]["closure"]["enum"],
             "contaminant": definitions["Contaminant"]["properties"]["type"]["enum"],
+            "compassPoint": definitions["CompassPoint"]["enum"],
+            "relativeEnd": definitions["RelativeEnd"]["enum"],
+            "referenceKind": definitions["ObstacleReference"]["properties"]["kind"]["enum"],
+            "datum": definitions["Height"]["properties"]["datum"]["enum"],
         }
 
     def all_items() -> list[dict]:
@@ -200,14 +212,6 @@ def create_app(database: Path, reviewer: str, half_of: Callable[[str], str | Non
     @app.post("/api/validate")
     async def check(request: ValidateRequest):
         return {"problems": [p.to_dict() for p in validate(request.extraction)]}
-
-    @app.get("/api/dms")
-    async def dms(text: str):
-        try:
-            latitude, longitude = parse_position(text)
-        except ValueError as error:
-            raise HTTPException(422, str(error)) from error
-        return {"latitude": latitude, "longitude": longitude}
 
     @app.post("/api/review")
     async def review(request: ReviewRequest):

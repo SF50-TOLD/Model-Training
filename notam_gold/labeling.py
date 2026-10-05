@@ -27,7 +27,7 @@ from notam_gold.schema import schema, schema_version, validate
 
 MAX_TOKENS = 16000
 EFFORT = "high"
-WIRE_UNSUPPORTED = ("minimum", "maximum")
+WIRE_UNSUPPORTED = ("minimum", "maximum", "exclusiveMaximum")
 
 
 @dataclass(frozen=True)

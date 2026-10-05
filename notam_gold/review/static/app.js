@@ -32,14 +32,32 @@ async function api(path, options = {}) {
 
 const FILTERS_KEY = "notam-review-filters";
 
-const COMPASS_POINTS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-const RELATIVE_ENDS = ["thresholdEnd", "departureEnd"];
+const RELATIVE_END_LABELS = { thresholdEnd: "Threshold end (FIRST)", departureEnd: "Departure end (LAST)" };
+const REFERENCE_LABELS = {
+  departureEnd: "Departure end of runway…",
+  threshold: "Threshold of runway…",
+  ARP: "ARP",
+  other: "Other point",
+};
+const RUNWAY_END_REFERENCES = ["departureEnd", "threshold"];
 
-/** Blank runway-end entries become null, so an unfinished "Runway end…" never saves as "". */
+/** The form as sent: blank runway entries become null and typed degrees become a number. */
 function cleaned(form) {
   const copied = copy(form);
-  for (const effect of copied.effects) if (effect.closedEnd === "") effect.closedEnd = null;
+  for (const effect of copied.effects) {
+    if (effect.partialClosure?.end === "") effect.partialClosure.end = null;
+  }
+  for (const obstacle of copied.obstacles) {
+    if (obstacle.reference?.runway === "") obstacle.reference.runway = null;
+    obstacle.direction = cleanedDirection(obstacle.direction);
+  }
   return copied;
+}
+
+/** A direction typed as degrees is a string until sent; compass points and numbers pass through. */
+function cleanedDirection(direction) {
+  if (direction === "") return null;
+  return typeof direction === "string" && Number.isFinite(Number(direction)) ? Number(direction) : direction;
 }
 
 /** The reviewer's last filters, surviving reloads; empty when storage is unavailable. */
@@ -60,7 +78,7 @@ function saveFilters(filters) {
 }
 
 function emptyExtraction() {
-  return { isCanceled: false, effects: [] };
+  return { isCanceled: false, effects: [], obstacles: [] };
 }
 
 /** Split `text` into runs, each tagged with the evidence paths whose quotes cover it. */
@@ -120,15 +138,8 @@ document.addEventListener("alpine:init", () => {
     queue: [],
     index: 0,
     filters: { stratum: "", half: "", status: "all", disagreement: false },
-    closedEndChoices: [
-      { value: "", label: "Not stated" },
-      { value: "thresholdEnd", label: "Threshold end (FIRST)" },
-      { value: "departureEnd", label: "Departure end (LAST)" },
-      ...COMPASS_POINTS.map((point) => ({ value: point, label: point })),
-      { value: "runway", label: "Runway end…" },
-    ],
     progress: [],
-    enums: { closure: [], contaminant: [] },
+    enums: { closure: [], contaminant: [], compassPoint: [], relativeEnd: [], referenceKind: [], datum: [] },
     current: null,
     form: emptyExtraction(),
     note: "",
@@ -204,13 +215,52 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
-    /** The dropdown choice for a stored closedEnd: its own value, or "runway" for a runway designator. */
-    closedEndChoice(value) {
-      if (value === null) return "";
-      return [...RELATIVE_ENDS, ...COMPASS_POINTS].includes(value) ? value : "runway";
+    endChoices() {
+      return [
+        { value: "", label: "Not stated" },
+        ...this.enums.relativeEnd.map((end) => ({ value: end, label: RELATIVE_END_LABELS[end] })),
+        ...this.compassChoices(),
+        { value: "runway", label: "Runway end…" },
+      ];
     },
-    chooseClosedEnd(effect, choice) {
-      effect.closedEnd = { "": null, runway: "" }[choice] ?? choice;
+    /** The dropdown choice for a stored partial-closure end: its own value, or "runway" for a designator. */
+    endChoice(value) {
+      if (value === null) return "";
+      return [...this.enums.relativeEnd, ...this.enums.compassPoint].includes(value) ? value : "runway";
+    },
+    chooseEnd(portion, choice) {
+      portion.end = { "": null, runway: "" }[choice] ?? choice;
+      this.changed();
+    },
+    compassChoices() {
+      return this.enums.compassPoint.map((point) => ({ value: point, label: point }));
+    },
+
+    referenceChoices() {
+      return [
+        { value: "", label: "Not stated" },
+        ...this.enums.referenceKind.map((kind) => ({ value: kind, label: REFERENCE_LABELS[kind] })),
+      ];
+    },
+    namesRunway(reference) {
+      return RUNWAY_END_REFERENCES.includes(reference?.kind);
+    },
+    chooseReference(obstacle, kind) {
+      const runway = RUNWAY_END_REFERENCES.includes(kind) ? (obstacle.reference?.runway ?? "") : null;
+      obstacle.reference = kind ? { kind, runway } : null;
+      this.changed();
+    },
+
+    directionChoices() {
+      return [{ value: "", label: "Not stated" }, ...this.compassChoices(), { value: "degrees", label: "Degrees…" }];
+    },
+    /** The dropdown choice for a stored direction: its compass point, or "degrees" for a number. */
+    directionChoice(value) {
+      if (value === null) return "";
+      return this.enums.compassPoint.includes(value) ? value : "degrees";
+    },
+    chooseDirection(obstacle, choice) {
+      obstacle.direction = { "": null, degrees: "" }[choice] ?? choice;
       this.changed();
     },
 
@@ -269,12 +319,16 @@ document.addEventListener("alpine:init", () => {
       for (const d of this.differencesWithin(path)) setAt(this.form, d.path, copy(d.b));
       this.changed();
     },
-    addRunBEffects(differences) {
-      for (const d of differences) this.form.effects.push(copy(d.b));
-      this.changed();
+    /** Items only run B found, as `effects[B:j]` and `obstacles[B:j]` differences. */
+    extras() {
+      return this.current?.disagreements.filter((d) => d.path.includes("[B:")) ?? [];
     },
-    extraEffects() {
-      return this.current?.disagreements.filter((d) => d.path.startsWith("effects[B:")) ?? [];
+    sectionOf(path) {
+      return path.startsWith("effects") ? "effect" : "obstacle";
+    },
+    addRunBExtras(differences) {
+      for (const d of differences) this.form[`${this.sectionOf(d.path)}s`].push(copy(d.b));
+      this.changed();
     },
     short(value) {
       if (value === undefined) return "(not compared)";
@@ -307,28 +361,20 @@ document.addEventListener("alpine:init", () => {
       this.form.effects.push({
         runway: null,
         closure: "none",
-        closedLength: null,
-        closedEnd: null,
+        partialClosure: null,
         thresholdDisplacement: null,
         declaredDistances: null,
         surfaceCondition: null,
-        obstacle: null,
       });
       this.changed();
     },
-    emptyObstacle() {
-      return {
-        heightAGL: null,
-        heightMSL: null,
-        distance: null,
-        distanceReference: null,
-        bearingDegrees: null,
-        latitude: null,
-        longitude: null,
-      };
+    addObstacle() {
+      this.form.obstacles.push({ height: null, distance: null, reference: null, direction: null });
+      this.changed();
     },
-    toggle(object, key, stated, units) {
-      object[key] = stated ? { value: null, unit: units[0] } : null;
+    /** Mark a measure as stated (a blank value in the first unit, plus `more` fields) or not stated. */
+    toggle(object, key, stated, units, more = {}) {
+      object[key] = stated ? { value: null, unit: units[0], ...more } : null;
       this.changed();
     },
     formatCodes(codes) {
@@ -340,19 +386,6 @@ document.addEventListener("alpine:init", () => {
     },
     intOrNull(text) {
       return text.trim() === "" ? null : parseInt(text, 10);
-    },
-    numberOrNull(text) {
-      return text.trim() === "" ? null : Number(text);
-    },
-    async fillPosition(obstacle, input) {
-      try {
-        const { latitude, longitude } = await api(`/api/dms?text=${encodeURIComponent(input.value)}`);
-        Object.assign(obstacle, { latitude, longitude });
-        input.value = "";
-        this.changed();
-      } catch {
-        this.message = "That isn't a DMS position like 403906N0734931W.";
-      }
     },
 
     async submit(status, extraction) {

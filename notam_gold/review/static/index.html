@@ -118,7 +118,7 @@
       <p class="empty" x-show="!form.effects.length">No effects. Nothing in this NOTAM changes runway performance.</p>
 
       <template x-for="(effect, e) in form.effects" :key="e">
-        <fieldset class="effect" :class="{ onlyA: flaggedExact(`effects[${e}]`) }"
+        <fieldset class="card effect" :class="{ onlyA: flaggedExact(`effects[${e}]`) }"
                   @mouseenter="hoverPath = `effects[${e}]`" @mouseleave="hoverPath = null">
           <legend>
             <span x-text="'Effect ' + (e + 1)"></span>
@@ -130,14 +130,14 @@
           <div class="grid">
             <label class="field" :class="{ disagree: flagged(`effects[${e}].runway`) }" @focusin="hoverPath = `effects[${e}].runway`">
               <span>Runway</span>
-              <input type="text" placeholder="all / aerodrome" :value="effect.runway ?? ''"
+              <input type="text" placeholder="09R, blank for all / aerodrome" :value="effect.runway ?? ''"
                      @input="effect.runway = $event.target.value.trim().toUpperCase() || null">
               <small class="flag" x-show="flagged(`effects[${e}].runway`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].runway`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].runway`)">Use run B</button></small>
               <small class="problem" x-text="problemAt(`effects[${e}].runway`)"></small>
             </label>
 
             <div class="field" :class="{ disagree: flagged(`effects[${e}].closure`) }" @focusin="hoverPath = `effects[${e}].closure`">
-              <span>Closure</span>
+              <span>Closed for</span>
               <div class="segmented" role="radiogroup">
                 <template x-for="c in enums.closure" :key="c">
                   <label><input type="radio" :name="`closure${e}`" :value="c" x-model="effect.closure"><span x-text="c"></span></label>
@@ -147,33 +147,41 @@
             </div>
           </div>
 
-          <div class="grid" x-show="effect.closure === 'partial' || effect.closedLength || effect.closedEnd">
-            <div class="field measure" :class="{ disagree: flagged(`effects[${e}].closedLength`) }" @focusin="hoverPath = `effects[${e}].closedLength`">
-              <span>Closed length</span>
-              <div class="inline">
-                <input type="checkbox" title="Stated" aria-label="Stated" :checked="effect.closedLength !== null" @change="toggle(effect, 'closedLength', $event.target.checked, ['ft','m'])">
-                <template x-if="effect.closedLength">
-                  <span class="inline"><input type="number" step="any" x-model.number="effect.closedLength.value" aria-label="Closed length"><select x-model="effect.closedLength.unit" aria-label="Closed length unit"><option>ft</option><option>m</option></select></span>
-                </template>
-                <em x-show="!effect.closedLength">not stated</em>
+          <div class="group" :class="{ disagree: flagged(`effects[${e}].partialClosure`) }">
+            <label class="toggle"><input type="checkbox" :checked="effect.partialClosure !== null"
+              @change="effect.partialClosure = $event.target.checked ? { length: null, end: null } : null; changed()"> Partial closure</label>
+            <small class="flag" x-show="flaggedExact(`effects[${e}].partialClosure`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].partialClosure`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].partialClosure`)">Use run B</button></small>
+            <small class="problem" x-text="problemAt(`effects[${e}].partialClosure`)"></small>
+            <template x-if="effect.partialClosure">
+              <div class="grid">
+                <div class="field measure" :class="{ disagree: flagged(`effects[${e}].partialClosure.length`) }" @focusin="hoverPath = `effects[${e}].partialClosure.length`">
+                  <span>Length</span>
+                  <div class="inline">
+                    <input type="checkbox" title="Stated" aria-label="Stated" :checked="effect.partialClosure.length !== null" @change="toggle(effect.partialClosure, 'length', $event.target.checked, ['ft','m'])">
+                    <template x-if="effect.partialClosure.length">
+                      <span class="inline"><input type="number" step="any" x-model.number="effect.partialClosure.length.value" aria-label="Length"><select x-model="effect.partialClosure.length.unit" aria-label="Length unit"><option>ft</option><option>m</option></select></span>
+                    </template>
+                    <em x-show="!effect.partialClosure.length">not stated</em>
+                  </div>
+                  <small class="flag" x-show="flagged(`effects[${e}].partialClosure.length`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].partialClosure.length`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].partialClosure.length`)">Use run B</button></small>
+                  <small class="problem" x-text="problemAt(`effects[${e}].partialClosure.length`, true)"></small>
+                </div>
+                <div class="field" :class="{ disagree: flagged(`effects[${e}].partialClosure.end`) }" @focusin="hoverPath = `effects[${e}].partialClosure.end`">
+                  <span>End</span>
+                  <div class="inline">
+                    <select aria-label="End" @change="chooseEnd(effect.partialClosure, $event.target.value)">
+                      <template x-for="choice in endChoices()" :key="choice.value">
+                        <option :value="choice.value" x-text="choice.label" :selected="endChoice(effect.partialClosure.end) === choice.value"></option>
+                      </template>
+                    </select>
+                    <input type="text" aria-label="Runway end" placeholder="27L" x-show="endChoice(effect.partialClosure.end) === 'runway'"
+                           :value="effect.partialClosure.end ?? ''" @input="effect.partialClosure.end = $event.target.value.trim().toUpperCase()">
+                  </div>
+                  <small class="flag" x-show="flagged(`effects[${e}].partialClosure.end`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].partialClosure.end`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].partialClosure.end`)">Use run B</button></small>
+                  <small class="problem" x-text="problemAt(`effects[${e}].partialClosure.end`)"></small>
+                </div>
               </div>
-              <small class="flag" x-show="flagged(`effects[${e}].closedLength`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].closedLength`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].closedLength`)">Use run B</button></small>
-              <small class="problem" x-text="problemAt(`effects[${e}].closedLength`) || problemAt(`effects[${e}].closedLength.value`)"></small>
-            </div>
-            <div class="field" :class="{ disagree: flagged(`effects[${e}].closedEnd`) }" @focusin="hoverPath = `effects[${e}].closedEnd`">
-              <span>Closed end</span>
-              <div class="inline">
-                <select aria-label="Closed end" @change="chooseClosedEnd(effect, $event.target.value)">
-                  <template x-for="choice in closedEndChoices" :key="choice.value">
-                    <option :value="choice.value" x-text="choice.label" :selected="closedEndChoice(effect.closedEnd) === choice.value"></option>
-                  </template>
-                </select>
-                <input type="text" aria-label="Closed runway end" placeholder="27L" x-show="closedEndChoice(effect.closedEnd) === 'runway'"
-                       :value="effect.closedEnd ?? ''" @input="effect.closedEnd = $event.target.value.trim().toUpperCase()">
-              </div>
-              <small class="flag" x-show="flagged(`effects[${e}].closedEnd`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].closedEnd`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].closedEnd`)">Use run B</button></small>
-              <small class="problem" x-text="problemAt(`effects[${e}].closedEnd`)"></small>
-            </div>
+            </template>
           </div>
 
           <div class="field measure" :class="{ disagree: flagged(`effects[${e}].thresholdDisplacement`) }" @focusin="hoverPath = `effects[${e}].thresholdDisplacement`">
@@ -191,11 +199,11 @@
 
           <div class="group" :class="{ disagree: flagged(`effects[${e}].declaredDistances`) }">
             <label class="toggle"><input type="checkbox" :checked="effect.declaredDistances !== null"
-              @change="effect.declaredDistances = $event.target.checked ? { TORA: null, TODA: null, ASDA: null, LDA: null } : null; changed()"> Declared distances</label>
+              @change="effect.declaredDistances = $event.target.checked ? { TORA: null, LDA: null } : null; changed()"> Declared distances</label>
             <small class="problem" x-text="problemAt(`effects[${e}].declaredDistances`)"></small>
             <template x-if="effect.declaredDistances">
               <div class="distances">
-                <template x-for="name in ['TORA', 'TODA', 'ASDA', 'LDA']" :key="name">
+                <template x-for="name in ['TORA', 'LDA']" :key="name">
                   <div class="field measure" :class="{ disagree: flagged(`effects[${e}].declaredDistances.${name}`) }"
                        @focusin="hoverPath = `effects[${e}].declaredDistances.${name}`">
                     <span x-text="name"></span>
@@ -231,7 +239,7 @@
                 <div class="contaminants" :class="{ disagree: flagged(`effects[${e}].surfaceCondition.contaminants`) }">
                   <div class="subhead">
                     <span>Contaminants</span>
-                    <button type="button" class="add" @click="effect.surfaceCondition.contaminants.push({ type: 'wet', runwayThird: null, coveragePercent: null, depth: null }); changed()">Add contaminant</button>
+                    <button type="button" class="add" @click="effect.surfaceCondition.contaminants.push({ type: 'wet', coveragePercent: null, depth: null }); changed()">Add contaminant</button>
                   </div>
                   <small class="flag" x-show="flagged(`effects[${e}].surfaceCondition.contaminants`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].surfaceCondition.contaminants`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].surfaceCondition.contaminants`)">Use run B</button></small>
                   <small class="problem" x-text="problemAt(`effects[${e}].surfaceCondition.contaminants`)"></small>
@@ -240,7 +248,6 @@
                       <select x-model="c.type" aria-label="Type">
                         <template x-for="t in enums.contaminant" :key="t"><option :value="t" x-text="t" :selected="t === c.type"></option></template>
                       </select>
-                      <label>Third <input type="number" min="1" max="3" :value="c.runwayThird ?? ''" @input="c.runwayThird = intOrNull($event.target.value)"></label>
                       <label>% <input type="number" min="0" max="100" :value="c.coveragePercent ?? ''" @input="c.coveragePercent = intOrNull($event.target.value)"></label>
                       <span class="inline">
                         <input type="checkbox" title="Depth stated" aria-label="Depth stated" :checked="c.depth !== null" @change="toggle(c, 'depth', $event.target.checked, ['in','mm'])">
@@ -255,68 +262,99 @@
               </div>
             </template>
           </div>
+        </fieldset>
+      </template>
 
-          <div class="group" :class="{ disagree: flagged(`effects[${e}].obstacle`) }">
-            <label class="toggle"><input type="checkbox" :checked="effect.obstacle !== null"
-              @change="effect.obstacle = $event.target.checked ? emptyObstacle() : null; changed()"> Obstacle</label>
-            <small class="flag" x-show="flaggedExact(`effects[${e}].obstacle`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].obstacle`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].obstacle`)">Use run B</button></small>
-            <small class="problem" x-text="problemAt(`effects[${e}].obstacle`)"></small>
-            <template x-if="effect.obstacle">
-              <div class="obstacle">
-                <template x-for="spec in [['heightAGL', 'Height AGL', ['ft','m']], ['heightMSL', 'Height MSL', ['ft','m']], ['distance', 'Distance', ['nm','ft','m']]]" :key="spec[0]">
-                  <div class="field measure" :class="{ disagree: flagged(`effects[${e}].obstacle.${spec[0]}`) }" @focusin="hoverPath = `effects[${e}].obstacle.${spec[0]}`">
-                    <span x-text="spec[1]"></span>
-                    <div class="inline">
-                      <input type="checkbox" title="Stated" aria-label="Stated" :checked="effect.obstacle[spec[0]] !== null" @change="toggle(effect.obstacle, spec[0], $event.target.checked, spec[2])">
-                      <template x-if="effect.obstacle[spec[0]]">
-                        <span class="inline"><input type="number" step="any" x-model.number="effect.obstacle[spec[0]].value" :aria-label="spec[1]">
-                          <select x-model="effect.obstacle[spec[0]].unit" :aria-label="spec[1] + ' unit'"><template x-for="u in spec[2]"><option :value="u" x-text="u" :selected="u === effect.obstacle[spec[0]].unit"></option></template></select></span>
-                      </template>
-                      <em x-show="!effect.obstacle[spec[0]]">not stated</em>
-                    </div>
-                    <small class="flag" x-show="flagged(`effects[${e}].obstacle.${spec[0]}`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].obstacle.${spec[0]}`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].obstacle.${spec[0]}`)">Use run B</button></small>
-                    <small class="problem" x-text="problemAt(`effects[${e}].obstacle.${spec[0]}`, true)"></small>
-                  </div>
+      <div class="row top">
+        <span class="toggle">Obstacles</span>
+        <button type="button" class="add" @click="addObstacle()">Add obstacle</button>
+      </div>
+      <p class="problem" x-text="problemAt('obstacles')"></p>
+
+      <p class="empty" x-show="!form.obstacles.length">No obstacles. Nothing in this NOTAM states an obstacle's height or distance.</p>
+
+      <template x-for="(obstacle, o) in form.obstacles" :key="o">
+        <fieldset class="card obstacle" :class="{ onlyA: flaggedExact(`obstacles[${o}]`) }"
+                  @mouseenter="hoverPath = `obstacles[${o}]`" @mouseleave="hoverPath = null">
+          <legend>
+            <span x-text="'Obstacle ' + (o + 1)"></span>
+            <button type="button" class="remove" @click="form.obstacles.splice(o, 1); changed()" :aria-label="'Remove obstacle ' + (o + 1)">Remove</button>
+          </legend>
+          <p class="flag" x-show="flaggedExact(`obstacles[${o}]`)">Run B has no matching obstacle.</p>
+          <p class="problem" x-text="problemAt(`obstacles[${o}]`)"></p>
+
+          <div class="grid">
+            <div class="field measure" :class="{ disagree: flagged(`obstacles[${o}].height`) }" @focusin="hoverPath = `obstacles[${o}].height`">
+              <span>Height</span>
+              <div class="inline">
+                <input type="checkbox" title="Stated" aria-label="Stated" :checked="obstacle.height !== null" @change="toggle(obstacle, 'height', $event.target.checked, ['ft','m'], { datum: enums.datum[0] })">
+                <template x-if="obstacle.height">
+                  <span class="inline">
+                    <input type="number" step="any" x-model.number="obstacle.height.value" aria-label="Height">
+                    <select x-model="obstacle.height.unit" aria-label="Height unit"><option>ft</option><option>m</option></select>
+                    <select x-model="obstacle.height.datum" aria-label="Height datum"><template x-for="d in enums.datum" :key="d"><option :value="d" x-text="d" :selected="d === obstacle.height.datum"></option></template></select>
+                  </span>
                 </template>
-                <label class="field" :class="{ disagree: flagged(`effects[${e}].obstacle.distanceReference`) }" @focusin="hoverPath = `effects[${e}].obstacle.distanceReference`">
-                  <span>Distance from</span>
-                  <input type="text" placeholder="not stated" :value="effect.obstacle.distanceReference ?? ''" @input="effect.obstacle.distanceReference = $event.target.value.trim() || null">
-                  <small class="flag" x-show="flagged(`effects[${e}].obstacle.distanceReference`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].obstacle.distanceReference`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].obstacle.distanceReference`)">Use run B</button></small>
-                </label>
-                <label class="field" :class="{ disagree: flagged(`effects[${e}].obstacle.bearingDegrees`) }" @focusin="hoverPath = `effects[${e}].obstacle.bearingDegrees`">
-                  <span>Bearing °</span>
-                  <input type="number" step="any" placeholder="not stated" :value="effect.obstacle.bearingDegrees ?? ''" @input="effect.obstacle.bearingDegrees = numberOrNull($event.target.value)">
-                  <small class="flag" x-show="flagged(`effects[${e}].obstacle.bearingDegrees`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].obstacle.bearingDegrees`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].obstacle.bearingDegrees`)">Use run B</button></small>
-                </label>
-                <label class="field" :class="{ disagree: flagged(`effects[${e}].obstacle.latitude`) }" @focusin="hoverPath = `effects[${e}].obstacle.latitude`">
-                  <span>Latitude</span>
-                  <input type="number" step="any" placeholder="not stated" :value="effect.obstacle.latitude ?? ''" @input="effect.obstacle.latitude = numberOrNull($event.target.value)">
-                  <small class="flag" x-show="flagged(`effects[${e}].obstacle.latitude`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].obstacle.latitude`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].obstacle.latitude`)">Use run B</button></small>
-                  <small class="problem" x-text="problemAt(`effects[${e}].obstacle.latitude`)"></small>
-                </label>
-                <label class="field" :class="{ disagree: flagged(`effects[${e}].obstacle.longitude`) }" @focusin="hoverPath = `effects[${e}].obstacle.longitude`">
-                  <span>Longitude</span>
-                  <input type="number" step="any" placeholder="not stated" :value="effect.obstacle.longitude ?? ''" @input="effect.obstacle.longitude = numberOrNull($event.target.value)">
-                  <small class="flag" x-show="flagged(`effects[${e}].obstacle.longitude`)"><span x-text="'Run B: ' + short(bValue(`effects[${e}].obstacle.longitude`))"></span> <button type="button" class="use-b" @click="useB(`effects[${e}].obstacle.longitude`)">Use run B</button></small>
-                </label>
-                <label class="field dms">
-                  <span>Paste a DMS position</span>
-                  <input type="text" placeholder="403906N0734931W" @change="fillPosition(effect.obstacle, $event.target)">
-                </label>
+                <em x-show="!obstacle.height">not stated</em>
               </div>
-            </template>
+              <small class="flag" x-show="flagged(`obstacles[${o}].height`)"><span x-text="'Run B: ' + short(bValue(`obstacles[${o}].height`))"></span> <button type="button" class="use-b" @click="useB(`obstacles[${o}].height`)">Use run B</button></small>
+              <small class="problem" x-text="problemAt(`obstacles[${o}].height`, true)"></small>
+            </div>
+
+            <div class="field measure" :class="{ disagree: flagged(`obstacles[${o}].distance`) }" @focusin="hoverPath = `obstacles[${o}].distance`">
+              <span>Distance</span>
+              <div class="inline">
+                <input type="checkbox" title="Stated" aria-label="Stated" :checked="obstacle.distance !== null" @change="toggle(obstacle, 'distance', $event.target.checked, ['nm','ft','m'])">
+                <template x-if="obstacle.distance">
+                  <span class="inline"><input type="number" step="any" x-model.number="obstacle.distance.value" aria-label="Distance"><select x-model="obstacle.distance.unit" aria-label="Distance unit"><option>nm</option><option>ft</option><option>m</option></select></span>
+                </template>
+                <em x-show="!obstacle.distance">not stated</em>
+              </div>
+              <small class="flag" x-show="flagged(`obstacles[${o}].distance`)"><span x-text="'Run B: ' + short(bValue(`obstacles[${o}].distance`))"></span> <button type="button" class="use-b" @click="useB(`obstacles[${o}].distance`)">Use run B</button></small>
+              <small class="problem" x-text="problemAt(`obstacles[${o}].distance`, true)"></small>
+            </div>
+
+            <div class="field" :class="{ disagree: flagged(`obstacles[${o}].reference`) }" @focusin="hoverPath = `obstacles[${o}].reference`">
+              <span>Distance from</span>
+              <div class="inline">
+                <select aria-label="Distance from" @change="chooseReference(obstacle, $event.target.value)">
+                  <template x-for="choice in referenceChoices()" :key="choice.value">
+                    <option :value="choice.value" x-text="choice.label" :selected="(obstacle.reference?.kind ?? '') === choice.value"></option>
+                  </template>
+                </select>
+                <input type="text" aria-label="Reference runway" placeholder="09R" x-show="namesRunway(obstacle.reference)"
+                       :value="obstacle.reference?.runway ?? ''" @input="obstacle.reference.runway = $event.target.value.trim().toUpperCase()">
+              </div>
+              <small class="flag" x-show="flagged(`obstacles[${o}].reference`)"><span x-text="'Run B: ' + short(bValue(`obstacles[${o}].reference`))"></span> <button type="button" class="use-b" @click="useB(`obstacles[${o}].reference`)">Use run B</button></small>
+              <small class="problem" x-text="problemAt(`obstacles[${o}].reference`, true)"></small>
+            </div>
+
+            <div class="field" :class="{ disagree: flagged(`obstacles[${o}].direction`) }" @focusin="hoverPath = `obstacles[${o}].direction`">
+              <span>Direction</span>
+              <div class="inline">
+                <select aria-label="Direction" @change="chooseDirection(obstacle, $event.target.value)">
+                  <template x-for="choice in directionChoices()" :key="choice.value">
+                    <option :value="choice.value" x-text="choice.label" :selected="directionChoice(obstacle.direction) === choice.value"></option>
+                  </template>
+                </select>
+                <input type="number" step="any" min="0" max="359.99" aria-label="Direction degrees" placeholder="270" x-show="directionChoice(obstacle.direction) === 'degrees'"
+                       :value="obstacle.direction" @input="obstacle.direction = $event.target.value">
+              </div>
+              <small class="flag" x-show="flagged(`obstacles[${o}].direction`)"><span x-text="'Run B: ' + short(bValue(`obstacles[${o}].direction`))"></span> <button type="button" class="use-b" @click="useB(`obstacles[${o}].direction`)">Use run B</button></small>
+              <small class="problem" x-text="problemAt(`obstacles[${o}].direction`)"></small>
+            </div>
           </div>
         </fieldset>
       </template>
 
-      <div class="extra-all" x-show="extraEffects().length > 1">
-        <button type="button" @click="addRunBEffects(extraEffects())" x-text="`Add all ${extraEffects().length} of run B's extra effects`"></button>
+      <div class="extra-all" x-show="extras().length > 1">
+        <button type="button" @click="addRunBExtras(extras())" x-text="`Add all ${extras().length} of run B's extras`"></button>
       </div>
-      <template x-for="d in extraEffects()" :key="d.path">
+      <template x-for="d in extras()" :key="d.path">
         <div class="extra">
-          <p>Run B also found this effect:</p>
+          <p x-text="`Run B also found this ${sectionOf(d.path)}:`"></p>
           <pre x-text="JSON.stringify(d.b, null, 1)"></pre>
-          <button type="button" @click="addRunBEffects([d])">Add run B's effect</button>
+          <button type="button" @click="addRunBExtras([d])" x-text="`Add run B's ${sectionOf(d.path)}`"></button>
         </div>
       </template>
 

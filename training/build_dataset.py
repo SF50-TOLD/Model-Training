@@ -26,6 +26,7 @@ from collections import Counter
 from notam_gold import db
 from notam_gold import strata as s
 from notam_gold.disagreement import diff
+from notam_gold.migrate import current
 from notam_gold.paths import DATABASE, EVAL_DIR
 from notam_gold.prompt import build_prompt
 from notam_gold.schema import canonicalize, validate
@@ -36,74 +37,71 @@ from training.select_training import DUAL_RUN_STRATA, normalized_text
 VALIDATION_SHARE = 0.05
 SPLIT_SALT = "notam-train-split-v1"
 
-EFFECT_KEYS = (
-    "runway",
-    "closure",
-    "closedLength",
-    "closedEnd",
-    "thresholdDisplacement",
-    "declaredDistances",
-    "surfaceCondition",
-    "obstacle",
-)
+EFFECT_KEYS = ("runway", "closure", "partialClosure", "thresholdDisplacement", "declaredDistances", "surfaceCondition")
 MEASURE_KEYS = ("value", "unit")
-DECLARED_KEYS = ("TORA", "TODA", "ASDA", "LDA")
-CONTAMINANT_KEYS = ("type", "runwayThird", "coveragePercent", "depth")
-OBSTACLE_KEYS = (
-    "heightAGL",
-    "heightMSL",
-    "distance",
-    "distanceReference",
-    "bearingDegrees",
-    "latitude",
-    "longitude",
-)
+HEIGHT_KEYS = ("value", "unit", "datum")
+DECLARED_KEYS = ("TORA", "LDA")
+CONTAMINANT_KEYS = ("type", "coveragePercent", "depth")
+OBSTACLE_KEYS = ("height", "distance", "reference", "direction")
+REFERENCE_KEYS = ("kind", "runway")
 
 
 def ordered(extraction: dict) -> dict:
     """The extraction with every object's keys in schema order."""
+    return {
+        "isCanceled": extraction["isCanceled"],
+        "effects": [_ordered_effect(e) for e in extraction["effects"]],
+        "obstacles": [_ordered_obstacle(o) for o in extraction["obstacles"]],
+    }
 
-    def measure(value):
-        return None if value is None else {k: value[k] for k in MEASURE_KEYS}
 
-    def effect(e):
-        condition = e["surfaceCondition"]
-        obstacle = e["obstacle"]
-        declared = e["declaredDistances"]
-        return {
-            "runway": e["runway"],
-            "closure": e["closure"],
-            "closedLength": measure(e["closedLength"]),
-            "closedEnd": e["closedEnd"],
-            "thresholdDisplacement": measure(e["thresholdDisplacement"]),
-            "declaredDistances": None if declared is None else {k: measure(declared[k]) for k in DECLARED_KEYS},
-            "surfaceCondition": None
-            if condition is None
-            else {
-                "rwyCC": condition["rwyCC"],
-                "contaminants": [
-                    {**{k: c[k] for k in CONTAMINANT_KEYS}, "depth": measure(c["depth"])}
-                    for c in condition["contaminants"]
-                ],
-            },
-            "obstacle": None
-            if obstacle is None
-            else {
-                k: measure(obstacle[k]) if k in ("heightAGL", "heightMSL", "distance") else obstacle[k]
-                for k in OBSTACLE_KEYS
-            },
+def _keyed(value: dict | None, keys: tuple[str, ...]) -> dict | None:
+    return None if value is None else {k: value[k] for k in keys}
+
+
+def _ordered_effect(effect: dict) -> dict:
+    ordered = {k: effect[k] for k in EFFECT_KEYS}
+    if (portion := effect["partialClosure"]) is not None:
+        ordered["partialClosure"] = {"length": _keyed(portion["length"], MEASURE_KEYS), "end": portion["end"]}
+    ordered["thresholdDisplacement"] = _keyed(effect["thresholdDisplacement"], MEASURE_KEYS)
+    if (declared := effect["declaredDistances"]) is not None:
+        ordered["declaredDistances"] = {k: _keyed(declared[k], MEASURE_KEYS) for k in DECLARED_KEYS}
+    if (condition := effect["surfaceCondition"]) is not None:
+        ordered["surfaceCondition"] = {
+            "rwyCC": condition["rwyCC"],
+            "contaminants": [_ordered_contaminant(c) for c in condition["contaminants"]],
         }
+    return ordered
 
-    return {"isCanceled": extraction["isCanceled"], "effects": [effect(e) for e in extraction["effects"]]}
+
+def _ordered_contaminant(contaminant: dict) -> dict:
+    return {**_keyed(contaminant, CONTAMINANT_KEYS), "depth": _keyed(contaminant["depth"], MEASURE_KEYS)}
+
+
+def _ordered_obstacle(obstacle: dict) -> dict:
+    return {
+        "height": _keyed(obstacle["height"], HEIGHT_KEYS),
+        "distance": _keyed(obstacle["distance"], MEASURE_KEYS),
+        "reference": _keyed(obstacle["reference"], REFERENCE_KEYS),
+        "direction": obstacle["direction"],
+    }
 
 
 def completion(extraction: dict) -> str:
     return json.dumps(ordered(canonicalize(extraction)), separators=(",", ":"), ensure_ascii=False)
 
 
+LATEST_SQL = """
+SELECT silver.notam_key, silver.run_name, silver.extraction, notam.notam_text
+FROM latest_silver AS silver JOIN notam ON notam.id = silver.notam_key
+WHERE silver.extraction IS NOT NULL
+"""
+
+
 def latest(connection: sqlite3.Connection) -> dict[tuple[str, str], dict]:
-    rows = connection.execute("SELECT notam_key, run_name, extraction FROM latest_silver WHERE extraction IS NOT NULL")
-    return {(r["notam_key"], r["run_name"]): json.loads(r["extraction"]) for r in rows}
+    """Each run's latest label per NOTAM, in the current schema."""
+    rows = connection.execute(LATEST_SQL)
+    return {(r["notam_key"], r["run_name"]): current(json.loads(r["extraction"]), r["notam_text"]) for r in rows}
 
 
 def kept_label(key: str, stratum: str, labels: dict) -> dict | None:

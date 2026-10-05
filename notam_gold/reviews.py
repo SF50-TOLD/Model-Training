@@ -3,15 +3,17 @@
 import sqlite3
 
 from notam_gold import db
+from notam_gold.db import UNREVIEWED_REVIEWER_PREFIX
 from notam_gold.disagreement import Difference, diff
+from notam_gold.migrate import current
 
-# Reviews recorded under a reviewer starting with this hold a silver label no person has checked.
-UNREVIEWED_REVIEWER_PREFIX = "Unreviewed:"
+__all__ = ["UNREVIEWED_REVIEWER_PREFIX", "stale_reviews"]
 
 STALE_SQL = """
-SELECT review.notam_key, review.extraction AS reviewed, silver.extraction AS silver
+SELECT review.notam_key, review.extraction AS reviewed, silver.extraction AS silver, notam.notam_text
 FROM current_review AS review
 JOIN latest_silver AS silver ON silver.notam_key = review.notam_key AND silver.run_name = 'A'
+JOIN notam ON notam.id = review.notam_key
 WHERE review.status != 'skipped' AND silver.created_at > review.reviewed_at AND silver.extraction IS NOT NULL
 """
 
@@ -24,7 +26,7 @@ def stale_reviews(connection: sqlite3.Connection) -> dict[str, list[Difference]]
     """
     stale = {}
     for row in connection.execute(STALE_SQL):
-        reviewed, silver = db.loads(row["reviewed"]), db.loads(row["silver"])
+        reviewed, silver = (current(db.loads(row[k]), row["notam_text"]) for k in ("reviewed", "silver"))
         differences = diff(reviewed, silver) if reviewed is not None else [Difference("", None, silver)]
         if differences:
             stale[row["notam_key"]] = differences

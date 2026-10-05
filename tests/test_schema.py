@@ -6,7 +6,18 @@ from jsonschema import Draft202012Validator
 
 from notam_gold.paths import SCHEMA_DOC
 from notam_gold.schema import canonicalize, schema, validate
-from tests.factories import contaminant, declared, effect, extraction, length, obstacle, surface
+from tests.factories import (
+    contaminant,
+    declared,
+    effect,
+    extraction,
+    height,
+    length,
+    obstacle,
+    partial,
+    reference,
+    surface,
+)
 
 
 def problem_paths(value):
@@ -28,30 +39,16 @@ def test_schema_doc_examples_are_valid_and_canonical():
 
 def test_missing_keys_are_schema_errors():
     value = extraction(effect())
-    del value["effects"][0]["obstacle"]
+    del value["effects"][0]["surfaceCondition"]
     assert validate(value)
 
 
 @pytest.mark.parametrize(
     ("value", "path"),
     [
-        (extraction(effect(closure="full"), isCanceled=True), "effects"),
-        (extraction(effect(closure="full", closedLength=length(500))), "effects[0].closedLength"),
-        (extraction(effect(closure="none", closedEnd="W", thresholdDisplacement=length(1))), "effects[0].closedEnd"),
-        (extraction(effect("09/27", declaredDistances=declared(TORA=length(5000)))), "effects[0].runway"),
-        (extraction(effect(None, thresholdDisplacement=length(300))), "effects[0].runway"),
-        (extraction(effect()), "effects[0]"),
-        (extraction(effect(declaredDistances=declared())), "effects[0].declaredDistances"),
-        (extraction(effect(thresholdDisplacement=length(0))), "effects[0].thresholdDisplacement"),
-        (extraction(effect(surfaceCondition=surface([5, 5]))), "effects[0].surfaceCondition.rwyCC"),
-        (
-            extraction(effect(surfaceCondition=surface(None, [contaminant(runwayThird=1), contaminant("ice")]))),
-            "effects[0].surfaceCondition.contaminants",
-        ),
-        (extraction(effect(obstacle=obstacle())), "effects[0].obstacle"),
-        (extraction(effect(obstacle=obstacle(latitude=40.0))), "effects[0].obstacle.latitude"),
-        (extraction(effect("09", "full"), effect("09", "full")), "effects[1]"),
-        (extraction(effect("16/34", "partial", closedEnd="thresholdEnd")), "effects[0].closedEnd"),
+        (extraction(effect(closure="both"), isCanceled=True), "effects"),
+        (extraction(obstacles=[obstacle(height=height(100))], isCanceled=True), "obstacles"),
+        (extraction(effect("09", "both"), effect("09", "both")), "effects[1]"),
         (
             extraction(
                 effect("30", thresholdDisplacement=length(357)),
@@ -59,28 +56,78 @@ def test_missing_keys_are_schema_errors():
             ),
             "effects[1]",
         ),
-        (extraction(effect("9R", "full")), "effects[0].runway"),
-        (extraction(effect("04/22", "full"), effect("22", thresholdDisplacement=length(615))), "effects[1]"),
-        (extraction(effect(obstacle=obstacle(distanceReference="THR 04R"))), "effects[0].obstacle.distanceReference"),
+        (extraction(effect(None), effect(None)), "effects[1]"),
+        (extraction(effect()), "effects[0]"),
+        (extraction(effect(closure="both", partialClosure=partial(length(500)))), "effects[0].partialClosure"),
+        (extraction(effect(closure="both", thresholdDisplacement=length(500))), "effects[0].thresholdDisplacement"),
+        (
+            extraction(effect(closure="both", declaredDistances=declared(TORA=length(500)))),
+            "effects[0].declaredDistances",
+        ),
+        (
+            extraction(effect(closure="takeoff", declaredDistances=declared(TORA=length(500)))),
+            "effects[0].declaredDistances.TORA",
+        ),
+        (
+            extraction(effect(closure="landing", declaredDistances=declared(LDA=length(500)))),
+            "effects[0].declaredDistances.LDA",
+        ),
+        (extraction(effect(None, partialClosure=partial())), "effects[0].runway"),
+        (extraction(effect(None, thresholdDisplacement=length(300))), "effects[0].runway"),
+        (extraction(effect(None, declaredDistances=declared(TORA=length(5000)))), "effects[0].runway"),
+        (extraction(effect(declaredDistances=declared())), "effects[0].declaredDistances"),
+        (extraction(effect(thresholdDisplacement=length(0))), "effects[0].thresholdDisplacement"),
+        (extraction(effect(partialClosure=partial(length(0)))), "effects[0].partialClosure.length"),
+        (extraction(effect(declaredDistances=declared(LDA=length(-1)))), "effects[0].declaredDistances.LDA"),
+        (extraction(effect(surfaceCondition=surface([5, 5]))), "effects[0].surfaceCondition.rwyCC"),
         (extraction(effect(surfaceCondition=surface([7, 5, 5]))), "effects[0].surfaceCondition.rwyCC[0]"),
+        (
+            extraction(effect(surfaceCondition=surface(None, [contaminant(depth=length(0, "in"))]))),
+            "effects[0].surfaceCondition.contaminants[0].depth",
+        ),
+        (extraction(obstacles=[obstacle()]), "obstacles[0]"),
+        (extraction(obstacles=[obstacle(distance=length(2, "nm"))]), "obstacles[0].reference"),
+        (extraction(obstacles=[obstacle(height=height(100), reference=reference("ARP"))]), "obstacles[0].reference"),
+        (
+            extraction(obstacles=[obstacle(distance=length(2, "nm"), reference=reference("departureEnd"))]),
+            "obstacles[0].reference.runway",
+        ),
+        (
+            extraction(obstacles=[obstacle(distance=length(2, "nm"), reference=reference("ARP", "09"))]),
+            "obstacles[0].reference.runway",
+        ),
+        (extraction(obstacles=[obstacle(height=height(100), direction=360)]), "obstacles[0].direction"),
+        (extraction(obstacles=[obstacle(height=height(0))]), "obstacles[0].height"),
+        (extraction(effect("9R", "both")), "effects[0].runway"),
+        (extraction(effect("09/27", "both")), "effects[0].runway"),
+        (extraction(effect(partialClosure=partial(end="NORTH"))), "effects[0].partialClosure.end"),
     ],
 )
 def test_semantic_and_schema_problems(value, path):
     assert path in [p for p, _ in problem_paths(value)]
 
 
-def test_one_runway_may_have_effects_that_cannot_be_combined():
-    two_obstacles = extraction(
-        effect("27", obstacle=obstacle(heightAGL=length(100))), effect("27", obstacle=obstacle(heightAGL=length(80)))
-    )
-    assert validate(two_obstacles) == []
+def test_two_obstacles_are_two_entries():
+    value = extraction(obstacles=[obstacle(height=height(100)), obstacle(height=height(80))])
+    assert validate(value) == []
 
 
 def test_valid_extraction_has_no_problems():
     value = extraction(
-        effect("09R/27L", "partial", closedLength=length(1713), closedEnd="W"),
-        effect("09R", declaredDistances=declared(TORA=length(6787), LDA=length(6787))),
-        effect(None, obstacle=obstacle(heightAGL=length(100), latitude=40.65, longitude=-73.8)),
+        effect(
+            "09R",
+            partialClosure=partial(length(1713), "W"),
+            declaredDistances=declared(TORA=length(6787), LDA=length(6787)),
+        ),
+        effect("27L", partialClosure=partial(length(1713), "W")),
+        effect("04", "landing", declaredDistances=declared(TORA=length(5000))),
+        effect("22", "both"),
+        effect(None, surfaceCondition=surface([5, 5, 5], [contaminant("wet", 100)])),
+        obstacles=[
+            obstacle(height(114, datum="MSL"), length(2.2, "nm"), reference("ARP"), "WNW"),
+            obstacle(height(440, datum="MSL"), length(4739), reference("departureEnd", "19")),
+            obstacle(height(60), length(1, "nm"), reference("threshold", "03L"), 114.5),
+        ],
     )
     assert validate(value) == []
 
@@ -88,17 +135,25 @@ def test_valid_extraction_has_no_problems():
 def test_canonical_order():
     value = extraction(
         effect("27L", declaredDistances=declared(TORA=length(1))),
-        effect("09R/27L", "partial"),
-        effect("09R", "partial"),
-        effect("09R", surfaceCondition=surface([5, 5, 5], [contaminant("wet", 2), contaminant("ice", 1)])),
-        effect(None, obstacle=obstacle(heightAGL=length(1))),
+        effect(
+            "09R",
+            surfaceCondition=surface(
+                [5, 5, 5], [contaminant("wet", 100), contaminant("ice", 25), contaminant("wet", 100)]
+            ),
+        ),
+        effect(None, closure="both"),
+        obstacles=[
+            obstacle(height(300), length(1, "nm"), reference("threshold", "27L"), "N"),
+            obstacle(height(114, datum="MSL"), length(2.2, "nm"), reference("ARP"), "WNW"),
+            obstacle(height(100), length(1, "nm"), reference("threshold", "09R")),
+            obstacle(height(50)),
+        ],
     )
-    ordered = canonicalize(value)["effects"]
-    assert [(e["runway"], e["closure"]) for e in ordered] == [
-        (None, "none"),
-        ("09R", "none"),
-        ("09R", "partial"),
-        ("09R/27L", "partial"),
-        ("27L", "none"),
+    ordered = canonicalize(value)
+    assert [e["runway"] for e in ordered["effects"]] == [None, "09R", "27L"]
+    assert ordered["effects"][1]["surfaceCondition"]["contaminants"] == [
+        contaminant("ice", 25),
+        contaminant("wet", 100),
     ]
-    assert [c["runwayThird"] for c in ordered[1]["surfaceCondition"]["contaminants"]] == [1, 2]
+    assert [(o["reference"] or {}).get("runway") for o in ordered["obstacles"]] == [None, None, "09R", "27L"]
+    assert [o["height"]["value"] for o in ordered["obstacles"][:2]] == [50, 114]

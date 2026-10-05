@@ -1,21 +1,21 @@
 # NOTAM extraction schema
 
-This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 1.5.0). The same contract is used in three places:
+This document explains, field by field, the contract defined in `notam_extraction.schema.json` (JSON Schema 2020-12, `schemaVersion` 2.0.0). The same contract is used in three places:
 
 - the silver labeler's instructions;
 - the human review tool;
 - the SF50 TOLD app's `@Generable` Swift struct and its Evaluations harness.
+
+The schema records exactly what the app needs to answer three questions about a runway direction: is it closed for takeoff or landing, what stated length or displacement shortens it, and is there an aerodrome obstacle whose height and distance from a runway end are knowable.
 
 ## Principles
 
 1. **Record only what the text states.** Never derive a value, and never fill a field from context, convention or common sense. The only exceptions are the unit rules listed under Units. When the text does not state a fact, the field is `null`. `null` is a real label: the evaluation scores it, because that is how it catches invented values.
 2. **Normalise the form, not the facts.** Units are recorded as written and never converted. Designators are recorded as written, zero-padded to two digits. Numbers lose their thousands separators and fractions become decimals (`1,500` → `1500`, `1/8IN` → `0.125`). Nothing is computed.
 3. **The app does the arithmetic.** The app itself derives these values, so the label never records them:
-   - shortening (runway length minus TORA/LDA);
-   - per-direction effects of a closure given for a runway pair;
-   - the app's own contamination categories;
-   - the governing RwyCC;
-   - obstacle distance from coordinates.
+   - shortening (runway length minus TORA/LDA, or the closed length, or the displacement);
+   - the app's own contamination categories and the governing RwyCC;
+   - which obstacle lies ahead of which takeoff.
 4. **The input is exactly what the model sees:** `Location: <icao_location>`, a blank line, then the NOTAM text as the NOTAM API returns it. A label may use only that input.
 
 ## Top level: `NOTAMExtraction`
@@ -23,7 +23,8 @@ This document explains, field by field, the contract defined in `notam_extractio
 | Field | Type | Rule |
 |---|---|---|
 | `isCanceled` | bool | `true` only when the text itself shows a cancellation: `NOTAMC`, `CANCELED`, `CANCELLED`, `CNL`, or "NOTAM CNL". A NOTAM that is cancelled only in metadata the model cannot see is labelled as its text reads. |
-| `effects` | [RunwayEffect] | One entry per runway designator that the text states a performance-relevant fact about, following the scope rule below. Empty when nothing qualifies. **Always empty when `isCanceled` is `true`.** |
+| `effects` | [RunwayEffect] | One entry per runway direction that the text states a performance-relevant fact about, following the scope rule below. Empty when nothing qualifies. **Always empty when `isCanceled` is `true`.** |
+| `obstacles` | [Obstacle] | One entry per obstacle in the aerodrome environment reported with a height or a position. Empty when none qualifies, and always empty when `isCanceled` is `true`. |
 
 Every key is always present. Optional values are an explicit `null`, never omitted.
 
@@ -31,26 +32,49 @@ Every key is always present. Optional values are an explicit `null`, never omitt
 
 | Field | Type | Rule |
 |---|---|---|
-| `runway` | string? | The designator exactly as the text writes it, normalised to `^\d{2}[LCR]?(/\d{2}[LCR]?)?$`: zero-pad (`9R` → `09R`), and write a pair with a slash (`18C-36C` → `18C/36C`). Use `null` when the effect applies to the aerodrome or to all runways, or when the text names no runway (`RWY` with no number, or an obstacle with no runway reference). Never infer the designator from the airport's layout. |
-| `closure` | `none` / `full` / `partial` | What this effect states about closure. `full`: the runway is stated closed (`CLSD`, `CLOSED`, `NOT AVBL`), including closures with exceptions (`CLSD EXC PPR`, `CLSD EXC SKED ACFT`), unless the exceptions include the SF50 or the closure applies only at stated times (see Scope rule). `partial`: a stated portion is closed (`W 1713FT CLSD`, `CLOSED FIRST 1,500 FT`, `N OF TWY K CLSD`). `none`: the effect states no closure. |
-| `closedLength` | Length? | Length of the closed portion, only when `closure` is `partial` and the length is stated. |
-| `closedEnd` | string? | Where the closed portion is, as stated, only when `closure` is `partial`. Write it as one of: a compass abbreviation (`NORTH END` → `N`, `W` → `W`); a runway end (`27L`); or, for a portion counted from one end of the effect's runway, `thresholdEnd` (`FIRST`/`FST 1500FT RWY 34`) or `departureEnd` (`LAST 90M RWY 10`). `thresholdEnd` and `departureEnd` are relative to the effect's `runway` and require a single direction. Use `null` when the text doesn't say where: FIRST or LAST given against a runway pair (`RWY 24L/6R CLOSED FIRST 1,500 FT`), or a position relative to a taxiway (`N OF TWY K`). When a NOTAM closes portions at both ends of different directions, each direction gets its own effect. |
-| `thresholdDisplacement` | Length? | The stated displacement of this runway's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). A relocated threshold (`THR RELOCATED 1040FT`) is recorded here too: it shortens the runway, and that shortening is what the app needs. When the text gives only a further displacement beyond a published one (`FURTHER DISPLACED BY 180M`), record the total if it is stated (`TOTAL DISPLACEMENT 589FT`), otherwise `null`. Requires a single-direction `runway`. |
-| `declaredDistances` | DeclaredDistances? | Declared distances as stated for this direction. Requires a single-direction `runway`. Use `null` when the text states none, or when no unit can be found for them (see Units). |
+| `runway` | string? | One runway direction, exactly as the text writes it, normalised to `^\d{2}[LCR]?$` (`9R` → `09R`). Use `null` when the effect applies to the aerodrome or to all runways, or when the text names no runway (`RWY` with no number). Never infer the designator from the airport's layout. |
+| `closure` | `none` / `takeoff` / `landing` / `both` | Which operations the text states this direction is closed to. See Closures. |
+| `partialClosure` | PartialClosure? | A stated closed portion of this direction, with its length and end when stated. `null` when no portion is stated closed. |
+| `thresholdDisplacement` | Length? | The stated displacement of this direction's threshold (`THR DSPLCD`, `DTHR`, `THR DISPLACED BY`). A relocated threshold (`THR RELOCATED 1040FT`) is recorded here too: it shortens the runway, and that shortening is what the app needs. When the text gives only a further displacement beyond a published one (`FURTHER DISPLACED BY 180M`), record the total if it is stated (`TOTAL DISPLACEMENT 589FT`), otherwise `null`. |
+| `declaredDistances` | DeclaredDistances? | TORA and LDA as stated for this direction. `null` when the text states neither, or when no unit can be found for them (see Units). |
 | `surfaceCondition` | SurfaceCondition? | A runway condition report: FAA `FICON`, Canadian `RSC`, or an ICAO `SNOWTAM` (GRF runway condition report). |
-| `obstacle` | Obstacle? | A physical obstacle (crane, tower, rig, etc.) reported with a height or position. |
 
-An effect must state something: a `closure` other than `none`, or at least one non-null field.
+An effect must state something: a `closure` other than `none`, or at least one non-null field. **One effect per direction:** every fact the text states about `09R` goes in the `09R` effect.
 
-Facts about the same designator go in one effect. A second effect for the same designator is only for facts that can't share one, such as a second obstacle. When a NOTAM states facts about different designators, each designator gets its own effect, keyed by the designator as written. The canonical case is a partial closure given for `09R/27L` with declared distances given for `09R` and `27L`. That's three effects: the pair's effect carries the closure, and each direction's effect carries only its declared distances, with `closure: "none"`. The closure is **not** repeated on the per-direction effects; the app merges effects by runway.
+**A pair expands.** A fact stated for a runway pair (`RWY 09/27 CLSD`, `RSC 04/22 …`) is a fact about each direction, so it is recorded on an effect for `09` and an effect for `27`, each carrying the same stated values. Nothing is recorded for the pair itself.
 
-## `Length`, `Depth`, `Distance`
+### Closures
+
+| Text | `closure` |
+|---|---|
+| `CLSD`, `CLOSED`, `NOT AVBL`, `CLSD FOR TKOF AND LDG`, `CLSD FOR ARR/DEP`, `CLSD TO LDG/TKOF TFC` | `both` |
+| `CLSD FOR LDG`, `CLSD LDG`, `LDG RWY 16R NOT AVBL`, `NOT AVBL FOR LDG`, `LDG NOT AUTH` | `landing` |
+| `CLSD FOR TKOF`, `DEP RWY 07 NOT AVBL`, `TKOF NOT AUTH` | `takeoff` |
+| Available for one operation only: `AVBL FOR TKOF ONLY`, `LIMITED TO ARR ONLY` | closed for the other operation (`landing`, `takeoff`) |
+| Closed with exceptions that do not include the SF50: `CLSD EXC PPR`, `CLSD EXC SKED ACFT`, `CLSD TO JET TFC`, `CLSD TO FIXED WING ACFT` | as the closure reads (`both`, `landing`, `takeoff`) |
+| Closed to a class that excludes the SF50, or with an exception that includes it: `CLSD TO ACFT OVER 12500LBS`, `CLSD TO HEL`, `CLSD EXC ACFT WINGSPAN LESS THAN 79FT` | `none` |
+| Closed only at stated times within the NOTAM's validity: `CLSD DLY 2200-0600`, `CLSD AFTER LAST SKED FLT`, `CLSD MON-FRI 0800-1600` | `none` |
+| A restriction, not a closure: `IFR DEP RWY 07 NOT AUTH`, `FIRST 3010FT NOT AVBL TO CIVILIAN ACFT` | `none` |
+
+A direction closed for an operation states no distance for it: `TORA` is `null` when the direction is closed for takeoff, `LDA` is `null` when it is closed for landing, and a direction closed for `both` records no `partialClosure`, `thresholdDisplacement` or `declaredDistances` at all, even when the text also shortens it (`RWY 10/28 FIRST 300M CLSD … RWY 10/28 AVBL FOR HEL ONLY`).
+
+## `PartialClosure`
+
+| Field | Type | Rule |
+|---|---|---|
+| `length` | Length? | Length of the closed portion, when stated (`W 1713FT CLSD`, `CLOSED FIRST 1,500 FT`). |
+| `end` | string? | Where the closed portion is, as stated. Write it as one of: a 16-point compass abbreviation (`NORTH END` → `N`, `W` → `W`); a runway end (`27L`); or, for a portion counted from one end of the effect's direction, `thresholdEnd` (`FIRST`/`FST 1500FT RWY 34`) or `departureEnd` (`LAST 90M RWY 10`). Use `null` when the text doesn't say where: FIRST or LAST given against a pair (`RWY 24L/6R CLOSED FIRST 1,500 FT`), or a position relative to a taxiway (`N OF TWY K`). |
+
+A portion stated closed with neither a length nor an end (`RWY 08L/26R CLSD BTN FOXTROT ROMEO AND TANGO`) is `{"length": null, "end": null}`: it still says a portion is closed. When a NOTAM closes portions at both ends of different directions, each direction gets its own `partialClosure`.
+
+## `Length`, `Depth`, `Distance`, `Height`
 
 | Type | Fields | Units |
 |---|---|---|
 | `Length` | `value`: number, `unit` | `ft`, `m` |
 | `Depth` | `value`: number, `unit` | `in`, `mm` |
 | `Distance` | `value`: number, `unit` | `ft`, `m`, `nm` |
+| `Height` | `value`: number, `unit`, `datum` | `ft`, `m`; datum `AGL` or `MSL` |
 
 **Units.** Units are recorded as written and never converted. A value's unit comes from the first of these that applies:
 
@@ -59,34 +83,33 @@ Facts about the same designator go in one effect. A second effect for the same d
 3. **Unitless declared distances**: the unit the same NOTAM uses for the runway's length and threshold displacement. That means its runway, available or closed lengths (`AVBL LEN 990M`, `RWY LENGTH TO READ: 3875FT`) and its displacement (`DTHR 210M`, `DISPLACED BY 1500FT`). If those lengths use different units, or the NOTAM states none, the declared distances have no unit.
 4. **Unitless heights and elevations in a US NOTAM**: if the NOTAM states no unit for any height, elevation or altitude, they are feet. A US NOTAM is one whose location is a US identifier: ICAO codes beginning `K`, `PA`, `PH`, `PG`, `PW` or `TJ`, or an FAA domestic identifier such as `BZN` or `64S`.
 
-No other convention supplies a unit ("Australian NOTAMs are metric" does not). A value with no unit is recorded as `null`, and the labeler notes it. If no declared distance for a direction has a unit, `declaredDistances` is `null`.
+No other convention supplies a unit ("Australian NOTAMs are metric" does not). A value with no unit is recorded as `null`, and the labeler notes it. If neither declared distance for a direction has a unit, `declaredDistances` is `null`.
 
 Every value is greater than zero.
 
 ## `DeclaredDistances`
 
-`TORA`, `TODA`, `ASDA`, `LDA`: each a `Length?`. Record the distances that are stated and leave the rest `null`; never copy one distance into another. A dash or `NIL` in a declared-distance table is `null`. Parenthesised gradients (`2232(2.37)`) are not recorded.
+`TORA` and `LDA`: each a `Length?`. Record the distances that are stated and leave the other `null`; never copy one distance into another. TODA and ASDA are not recorded. A dash or `NIL` in a declared-distance table is `null`. Parenthesised gradients (`2232(2.37)`) are not recorded.
 
 Declared distances that name no runway belong to the only runway direction the NOTAM names (`THR RWY 27 DISPLACED 200M … DECLARED DISTANCES CHANGED: TORA: 690M.` → runway `27`). If the NOTAM names more than one runway, or names only a pair (`RWY 09/27`), they have no direction, so they aren't recorded and the labeler notes it.
 
-Declared distances given for a runway pair (`RWY12R/30L LDA 320M`) apply to each direction: record one effect per direction, each with the same values.
+Declared distances given for a runway pair (`RWY12R/30L LDA 320M`) apply to each direction: each direction's effect records the same values.
 
-Distances measured from an intersection (`DIST FROM TWY B: RWY 10 - TORA-2123M`) are for intersection takeoffs, not the runway's declared distances. They aren't recorded.
+Figures that aren't labelled as declared distances are not declared distances: "available length", "effective operating length" and "remaining" figures (`AVBL LEN 1200M`, `EFFECTIVE OPR LENGTH 1420M`) are not recorded, though they do supply a unit (Units rule 3). Distances measured from an intersection (`DIST FROM TWY B: RWY 10 - TORA-2123M`) are for intersection takeoffs, not the runway's declared distances. They aren't recorded.
 
 ## `SurfaceCondition`
 
 | Field | Type | Rule |
 |---|---|---|
 | `rwyCC` | [int 0…6]? | The runway condition codes as reported, in reporting order (`5/5/3` → `[5, 5, 3]`). A single reported code is `[n]`. `null` when no codes are reported. |
-| `contaminants` | [Contaminant] | The contaminants reported for the runway surface covered by the report. May be empty (for example, a report of `DRY`). |
+| `contaminants` | [Contaminant] | The distinct contaminants reported for the runway surface covered by the report. May be empty (for example, a report of `DRY`). |
 
 **Report formats.** Three formats appear in the corpus:
 
-- **FAA `FICON`** (JO 7930.2): `RWY 31 FICON 6/3/3 10 PCT ICE AND 10 PCT COMPACTED SN, 10 PCT ICE AND …`. When one contaminant list follows the codes, it covers the whole runway (`runwayThird: null`). When the thirds differ, commas separate them, in reporting order (thirds 1, 2, 3).
-- **Canadian `RSC`**: `RSC 16 3/2/5 50 PCT 1/8IN WET SNOW, 70 PCT 1/8IN WET SNOW, 40 PCT 1/8IN WET SNOW.` This follows the same rules as FICON. The runway follows `RSC`.
+- **FAA `FICON`** (JO 7930.2): `RWY 31 FICON 6/3/3 10 PCT ICE AND 10 PCT COMPACTED SN, 10 PCT ICE AND …`. Commas separate the thirds, in reporting order; every contaminant of every third is recorded, and a contaminant reported identically for several thirds is recorded once.
+- **Canadian `RSC`**: `RSC 16 3/2/5 50 PCT 1/8IN WET SNOW, 70 PCT 1/8IN WET SNOW, 40 PCT 1/8IN WET SNOW.` This follows the same rules as FICON. The runway follows `RSC`; a pair (`RSC 04/22`) gives an effect per direction.
 - **ICAO `SNOWTAM`** (GRF): each runway line is `<observed> <runway> <RWYCC> <coverage> <depth> <condition>`, with every field given per third and separated by slashes. For example, `09241032 16 5/5/5 100/100/100 03/03/03 DRY SNOW/DRY SNOW/DRY SNOW`.
   - Each runway line is its own effect.
-  - Contaminants are always per third (`runwayThird` 1–3).
   - The SNOWTAM format itself defines coverage as percent and depth as millimetres, so those units count as stated, just as the FAA `OBST` format defines its first height as MSL.
   - A third reported as `DRY` or `NR` has no contaminant. An `NR` coverage or depth is `null`.
 
@@ -97,7 +120,6 @@ Remarks such as `RWYCC DOWNGRADED`, friction coefficients (`CRFI`, `MEASURED FRI
 | Field | Type | Rule |
 |---|---|---|
 | `type` | enum | See the vocabulary below. |
-| `runwayThird` | int 1…3? | When the report lists contaminants per third (FAA FICON separates thirds with commas, in reporting order), this is the third it was reported for. Otherwise `null`. Within one report, either every contaminant has a third or none does. |
 | `coveragePercent` | int 0…100? | The stated percentage (`40 PCT`). `PATCHY` and `THIN` are not percentages, so they record `null`. |
 | `depth` | Depth? | The stated depth (`1/8IN` → `0.125 in`). For a layered contaminant, this is the depth of the top layer. |
 
@@ -135,75 +157,60 @@ Remarks such as `RWYCC DOWNGRADED`, friction coefficients (`CRFI`, `MEASURED FRI
 
 ## `Obstacle`
 
+An obstacle is a physical object (crane, tower, rig, etc.) reported in the aerodrome environment with a height or a position. Each distinct obstacle is one entry; an obstacle must state a height or a distance.
+
 | Field | Type | Rule |
 |---|---|---|
-| `heightAGL` | Length? | Height above ground: a height stated as `AGL`, or labelled `HEIGHT`/`HGT` without `AMSL`/`MSL`. |
-| `heightMSL` | Length? | Elevation above sea level: a height stated as `MSL` or `AMSL`, or labelled `ELEVATION`/`ELEV`. In the FAA `OBST` format `<n>FT (<n>FT AGL)`, the first height is MSL by that format's definition. `UNKNOWN` is `null`. |
+| `height` | Height? | The stated height with its datum: `AGL` for a height stated as `AGL` or labelled `HEIGHT`/`HGT` without `AMSL`/`MSL`; `MSL` for an elevation stated as `MSL` or `AMSL`, or labelled `ELEVATION`/`ELEV`. In the FAA `OBST` format `<n>FT (<n>FT AGL)`, the first height is MSL by that format's definition. When both are stated, record the MSL one. `UNKNOWN` is not a height: record the other one, or `null`. |
 | `distance` | Distance? | The stated distance from the reference. |
-| `distanceReference` | string? | What the distance is measured from, as stated (`APCH END RWY 03L`, `ARP`, `JFK`, `TORA RWY 18C`). `null` when `distance` is `null`. |
-| `bearingDegrees` | number? | A numeric bearing, when stated (`270 DEG`). Compass words (`WNW`) are not converted; they record `null`. |
-| `latitude`, `longitude` | number? | The stated DMS position converted to decimal degrees (north and east positive, 6 decimal places). Converting the notation counts as normalising the form, not deriving a fact. Always a pair. Q-line coordinates are the NOTAM's area of influence, not the obstacle's position, and are never used. |
+| `reference` | ObstacleReference? | What the distance is measured from. `null` exactly when `distance` is `null`. |
+| `direction` | string / number? | The direction from the reference as stated: a 16-point compass abbreviation (`WNW`, `N`), or a bearing in degrees when the text gives one (`RDL 114`, `270 DEG`, `BRG 090`). `RIGHT OF CENTERLINE` and the like are not directions; they record `null`. |
 
-The obstacle's `runway` is the runway the text relates it to (`APCH END RWY 03L` → `03L`). Otherwise it is `null`.
+### `ObstacleReference`
+
+| Field | Type | Rule |
+|---|---|---|
+| `kind` | `departureEnd` / `threshold` / `ARP` / `other` | `departureEnd` for `DER`, `DEP END`, `DEPARTURE END`, and a distance `BEYOND TORA RWY xx` or `BEYOND END RWY xx`. `threshold` for `THR`, `THRESHOLD`, `APCH END`, `APPROACH END`, `BFR THR`. `ARP` for `ARP`, and for the airport identifier in the FAA `OBST … (<n>NM <direction> <IDENT>)` format, whose reference is the airport. `other` for anything else (a taxiway, a town, a heliport, `FROM RWY` without an end). |
+| `runway` | string? | For `departureEnd` and `threshold`: the runway end's direction, normalised like `RunwayEffect.runway`. It is the designator named with the end; when none is named and the NOTAM names exactly one direction, that one. For `ARP` and `other`: `null`. A runway end the text does not place on a direction is `other`. |
+
+Positions (`PSN 523627N 0002918W`) are not recorded.
 
 ## Scope rule
 
-The app is SF50 TOLD, for the Cirrus SF50 Vision Jet: a light, single-engine, fixed-wing jet (6,000 lb maximum takeoff weight, 39 ft wingspan). A NOTAM gets effects only if it changes something the app models:
+The app is SF50 TOLD, for the Cirrus SF50 Vision Jet: a light, single-engine, fixed-wing jet (6,000 lb maximum takeoff weight, 39 ft wingspan). A NOTAM gets effects or obstacles only if it changes something the app models:
 
-- runway availability or length (closures);
-- the threshold;
-- declared distances;
+- runway availability for takeoff or landing (closures);
+- the usable length of a direction (closed portions, the threshold, declared distances);
 - runway surface condition;
 - an obstacle in the aerodrome environment.
 
-Everything else gets `effects: []`.
+Everything else gets `effects: []` and `obstacles: []`.
 
-| NOTAM | Effects |
+| NOTAM | Label |
 |---|---|
-| Runway lighting, approach lights, PAPI/VASI, REIL, runway edge or centreline lights | `[]` |
-| ILS, localizer, glideslope, VOR, DME, GPS or other navaid outages | `[]` |
-| Taxiway or apron closures, and taxiway or apron FICONs (`TWY … FICON`, `APRON … FICON`) | `[]` |
-| Procedure minima, SID/STAR/IAP changes, circling restrictions | `[]` |
-| A runway fact given only as the reason (`DUE …`) for an out-of-scope change (`AUTH TO CIRCLING MINIMA ONLY … DUE THR DISPLACED`); a fact the text states in its own right is recorded | not recorded: the NOTAM that states the fact itself carries it; `[]` unless something else qualifies |
-| An obstacle named in an instrument approach procedure (IAP) or minima NOTAM (`IAP … TEMPORARY CRANE 809 MSL 1.36NM NW OF RWY 31`) | not recorded: approach obstacles are not takeoff obstacles; `[]` unless something else qualifies |
-| A temporary obstacle an obstacle departure procedure adds (`ODP … TEMPORARY CRANE 4739 FT FROM DER`) | effect with `obstacle`: departure obstacles are takeoff obstacles |
+| Anything that isn't one of the four things above: runway, approach or obstacle lighting; navaids and GPS; taxiway and apron closures and FICONs (`TWY … FICON`); procedure minima and SID/STAR/IAP changes; aerodrome or service hours, ATC, fuel, customs; airspace, UAS, parachuting, military activity; markings, signs, rubber removal, grass cutting; helipad and water-lane closures and conditions | nothing |
+| A runway fact given only as the reason (`DUE …`) for an out-of-scope change (`AUTH TO CIRCLING MINIMA ONLY … DUE THR DISPLACED`); a fact the text states in its own right is recorded | not recorded: the NOTAM that states the fact itself carries it |
+| An obstacle named in an instrument approach procedure (IAP) or minima NOTAM (`IAP … TEMPORARY CRANE 809 MSL 1.36NM NW OF RWY 31`) | not recorded: approach obstacles are not takeoff obstacles |
+| A temporary obstacle an obstacle departure procedure adds (`ODP … TEMPORARY CRANE 4739 FT FROM DER`) | an obstacle: departure obstacles are takeoff obstacles |
 | A list of published obstacles in an ODP's takeoff minimum notes (`TAKEOFF OBSTACLE NOTES: TREE … FROM DER …, TREE …`) | not recorded |
 | An obstacle that exists only under a stated condition (`OBST EXISTS ONLY WHEN RAISED`) | not recorded |
-| An obstacle in an en-route obstacle list (`REF AIP ENR 5.4`, low-flying-zone or vertical-obstacle lists) | not recorded: it is not in an aerodrome environment; `[]` unless something else qualifies |
-| Aerodrome or service hours, ATC, fuel, customs | `[]` |
-| Airspace, UAS/drone operations, parachuting, military activity | `[]` |
-| Obstacle **lights** unserviceable (`OBST LGT U/S`) | `[]` |
-| Runway markings, signs, ungrooved sections, rubber removal, grass cutting | `[]` |
-| A runway closed only to a class of aircraft that excludes the SF50 (`CLSD TO ACFT WINGSPAN MORE THAN 118FT`, `CLSD TO ACFT OVER 12500LBS`, `CLSD TO HEL`) | `[]` |
-| A runway closed to a class of aircraft that includes the SF50 (`CLSD TO JET TFC`, `CLSD TO FIXED WING ACFT`) | `closure: "full"` |
-| A runway closed with exceptions that include the SF50 (`CLSD EXC ACFT WINGSPAN LESS THAN 79FT`) | `[]`: in effect, closed only to a class that excludes the SF50 |
-| A runway closed with other exceptions (`CLSD EXC PPR`) | `closure: "full"` |
-| A runway fully closed to the SF50 that the NOTAM also shortens (`RWY 10/28 FIRST 300M CLSD … RWY 10/28 AVBL FOR HEL ONLY`, `RWY 10/28 NOT AVBL DUE WIP FOR THR 28 DISPLACEMENT`) | only the full closure: no partial closure, displacement or declared distances for its directions |
-| A runway or portion closed only at stated times within the NOTAM's validity (`CLSD DLY 2200-0600`, `CLSD AFTER LAST SKED FLT`, `CLSD MON-FRI 0800-1600`) | not a closure; `[]` unless something else qualifies |
-| Takeoff or landing not available in one direction only (`LDG RWY 16R NOT AVBL`) | not a closure; `[]` unless something else qualifies |
-| "Effective operating length", "available length" or "remaining" figures that aren't labelled as declared distances | not recorded |
-| A threshold that is no longer displaced, or declared distances "as published" | `[]` |
-| A runway FICON, even when it reports only `WET` | effect with `surfaceCondition` |
-| A crane or tower with a height or position and no runway reference | effect with `runway: null` and `obstacle` |
-| Helipad and water-lane closures and conditions | `[]` |
-| An obstacle at a heliport | effect with `obstacle`: which aerodromes matter is for the app to decide |
+| An obstacle in an en-route obstacle list (`REF AIP ENR 5.4`, low-flying-zone or vertical-obstacle lists) | not recorded: it is not in an aerodrome environment |
+| An obstacle at a heliport | an obstacle: which aerodromes matter is for the app to decide |
+| A runway closed to a class of aircraft that excludes the SF50, or with an exception that includes it (see Closures) | `closure: "none"` |
+| A runway closed to a class that includes the SF50 (`CLSD TO JET TFC`, `CLSD TO FIXED WING ACFT`), or with other exceptions (`CLSD EXC PPR`) | the closure as it reads |
+| A runway closed for one operation (`LDG RWY 16R NOT AVBL`, `RWY 20 CLSD LDG`), or available for one operation only (`LIMITED TO ARR ONLY`) | `closure: "landing"` or `"takeoff"` |
+| A runway or portion closed only at stated times within the NOTAM's validity | not a closure |
+| A direction closed for `both` that the NOTAM also shortens | only the closure |
+| A threshold that is no longer displaced, or declared distances "as published" | nothing |
+| A runway FICON, even when it reports only `WET` | `surfaceCondition` |
 
 ## Canonical ordering
 
 Gold labels are stored in canonical order, and the evaluation canonicalises model output the same way before scoring. The order the model emits in therefore never affects its score.
 
-**Effects** are sorted by, in order:
-
-1. `runway`, with `null` first and the rest in lexicographic order;
-2. `closure` in the order `none`, `full`, `partial`;
-3. whether `thresholdDisplacement` is present (absent first);
-4. whether `declaredDistances` is present (absent first);
-5. whether `surfaceCondition` is present (absent first);
-6. whether `obstacle` is present (absent first).
-
-The sort is stable, so remaining ties keep their original order.
-
-**Contaminants** within a `surfaceCondition` are sorted by `runwayThird` (`null` first, then ascending), then by `type` in lexicographic order.
+- **Effects** are sorted by `runway`, with `null` first and the rest in lexicographic order. Since each direction has one effect, this order is total.
+- **Obstacles** are sorted by their reference's `runway` (`null` first), then its `kind`, then `height.value`, `distance.value` and `direction`. The sort is stable.
+- **Contaminants** within a `surfaceCondition` are deduplicated, then sorted by `type`, `coveragePercent` and `depth`.
 
 ## Worked examples
 
@@ -225,20 +232,11 @@ LDA 10275FT.
     {
       "runway": "28L",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": {
         "TORA": {
           "value": 10810,
-          "unit": "ft"
-        },
-        "TODA": {
-          "value": 10810,
-          "unit": "ft"
-        },
-        "ASDA": {
-          "value": 10981,
           "unit": "ft"
         },
         "LDA": {
@@ -246,10 +244,10 @@ LDA 10275FT.
           "unit": "ft"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -263,7 +261,7 @@ TORA: 1665M
 TODA: 1665M
 ```
 
-ASDA and LDA are not stated, so they are null. They are not copied from TORA.
+LDA is not stated, so it is null. It is not copied from TORA. TODA is not recorded.
 
 ```json
 {
@@ -272,25 +270,19 @@ ASDA and LDA are not stated, so they are null. They are not copied from TORA.
     {
       "runway": "19",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": {
         "TORA": {
           "value": 1665,
           "unit": "m"
         },
-        "TODA": {
-          "value": 1665,
-          "unit": "m"
-        },
-        "ASDA": null,
         "LDA": null
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -305,7 +297,7 @@ TODA 6787FT
 LDA 6787FT.
 ```
 
-Three effects. The closure is stated for the pair, so it goes on the pair's effect only. Each direction's effect records only its declared distances and has closure "none"; the partial closure is not repeated.
+The closure is stated for the pair, so each direction's effect records it, and each records its own declared distances. TODA and ASDA are not recorded.
 
 ```json
 {
@@ -314,19 +306,16 @@ Three effects. The closure is stated for the pair, so it goes on the pair's effe
     {
       "runway": "09R",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": {
+        "length": {
+          "value": 1713,
+          "unit": "ft"
+        },
+        "end": "W"
+      },
       "thresholdDisplacement": null,
       "declaredDistances": {
         "TORA": {
-          "value": 6787,
-          "unit": "ft"
-        },
-        "TODA": {
-          "value": 6787,
-          "unit": "ft"
-        },
-        "ASDA": {
           "value": 6787,
           "unit": "ft"
         },
@@ -335,38 +324,21 @@ Three effects. The closure is stated for the pair, so it goes on the pair's effe
           "unit": "ft"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
-    },
-    {
-      "runway": "09R/27L",
-      "closure": "partial",
-      "closedLength": {
-        "value": 1713,
-        "unit": "ft"
-      },
-      "closedEnd": "W",
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     },
     {
       "runway": "27L",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": {
+        "length": {
+          "value": 1713,
+          "unit": "ft"
+        },
+        "end": "W"
+      },
       "thresholdDisplacement": null,
       "declaredDistances": {
         "TORA": {
-          "value": 6787,
-          "unit": "ft"
-        },
-        "TODA": {
-          "value": 6787,
-          "unit": "ft"
-        },
-        "ASDA": {
           "value": 6787,
           "unit": "ft"
         },
@@ -375,10 +347,10 @@ Three effects. The closure is stated for the pair, so it goes on the pair's effe
           "unit": "ft"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -407,8 +379,7 @@ The declared-distance table gives no unit, so it takes the unit this NOTAM uses 
     {
       "runway": "07",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": {
         "value": 210,
         "unit": "m"
@@ -418,50 +389,32 @@ The declared-distance table gives no unit, so it takes the unit this NOTAM uses 
           "value": 1090,
           "unit": "m"
         },
-        "TODA": {
-          "value": 1150,
-          "unit": "m"
-        },
-        "ASDA": {
-          "value": 1090,
-          "unit": "m"
-        },
         "LDA": {
           "value": 990,
           "unit": "m"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     },
     {
       "runway": "25",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": {
         "TORA": {
           "value": 1090,
           "unit": "m"
         },
-        "TODA": {
-          "value": 1090,
-          "unit": "m"
-        },
-        "ASDA": {
-          "value": 1090,
-          "unit": "m"
-        },
         "LDA": {
           "value": 990,
           "unit": "m"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -485,8 +438,7 @@ The declared distances name no runway, so they belong to RWY 27, the only runway
     {
       "runway": "27",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": {
         "value": 200,
         "unit": "m"
@@ -496,17 +448,15 @@ The declared distances name no runway, so they belong to RWY 27, the only runway
           "value": 690,
           "unit": "m"
         },
-        "TODA": null,
-        "ASDA": null,
         "LDA": {
           "value": 690,
           "unit": "m"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -528,21 +478,20 @@ DISPLACED THR LIGHT OPR
     {
       "runway": "34",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": {
         "value": 320,
         "unit": "m"
       },
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
-### Partial closure from one end, end not named
+### Partial closure of a pair from one end, end not named
 
 ```text
 Location: NKX
@@ -550,26 +499,42 @@ Location: NKX
 RWY 24L/6R CLOSED FIRST 1,500 FT FOR CONCRETE DEMO. LAST 6,500 FT OF RWY USED FOR CONSTRUCTION VEHICLES AND HAUL ROUTES.
 ```
 
-"6R" is zero-padded to "06R" and "1,500" becomes 1500. FIRST is given against the pair, not one direction, so closedEnd is null.
+"6R" is zero-padded to "06R" and "1,500" becomes 1500. FIRST is given against the pair, not one direction, so each direction records the closed length with end null.
 
 ```json
 {
   "isCanceled": false,
   "effects": [
     {
-      "runway": "24L/06R",
-      "closure": "partial",
-      "closedLength": {
-        "value": 1500,
-        "unit": "ft"
+      "runway": "06R",
+      "closure": "none",
+      "partialClosure": {
+        "length": {
+          "value": 1500,
+          "unit": "ft"
+        },
+        "end": null
       },
-      "closedEnd": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
+    },
+    {
+      "runway": "24L",
+      "closure": "none",
+      "partialClosure": {
+        "length": {
+          "value": 1500,
+          "unit": "ft"
+        },
+        "end": null
+      },
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -590,35 +555,38 @@ FIRST (FST) is counted from the named runway's threshold and LAST from its depar
   "effects": [
     {
       "runway": "08",
-      "closure": "partial",
-      "closedLength": {
-        "value": 100,
-        "unit": "m"
+      "closure": "none",
+      "partialClosure": {
+        "length": {
+          "value": 100,
+          "unit": "m"
+        },
+        "end": "thresholdEnd"
       },
-      "closedEnd": "thresholdEnd",
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     },
     {
       "runway": "26",
-      "closure": "partial",
-      "closedLength": {
-        "value": 100,
-        "unit": "m"
+      "closure": "none",
+      "partialClosure": {
+        "length": {
+          "value": 100,
+          "unit": "m"
+        },
+        "end": "departureEnd"
       },
-      "closedEnd": "departureEnd",
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
-### Full closure
+### Full closure of a pair
 
 ```text
 Location: NZCH
@@ -626,21 +594,146 @@ Location: NZCH
 RWY 02/20 CLSD DUE WIP
 ```
 
+A closure stated for the pair closes each direction for both operations.
+
 ```json
 {
   "isCanceled": false,
   "effects": [
     {
-      "runway": "02/20",
-      "closure": "full",
-      "closedLength": null,
-      "closedEnd": null,
+      "runway": "02",
+      "closure": "both",
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
+    },
+    {
+      "runway": "20",
+      "closure": "both",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
+}
+```
+
+### Closed for both operations, spelled out
+
+```text
+Location: EPCE
+
+RWY 07/25 CLSD FOR TKOF AND LDG OPERATIONS DUE TO WEATHER 
+CONDITIONS.
+```
+
+Closed for takeoff and landing is closed for both, in each direction. The weather is the reason, not a condition on the closure.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "07",
+      "closure": "both",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
+    },
+    {
+      "runway": "25",
+      "closure": "both",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
+    }
+  ],
+  "obstacles": []
+}
+```
+
+### Closed for one operation
+
+```text
+Location: EPOK
+
+RWY 13/31 CLSD FOR LDG.
+```
+
+Each direction of the pair is closed for landing only. Nothing is stated about takeoff, so no distance is recorded either.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "13",
+      "closure": "landing",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
+    },
+    {
+      "runway": "31",
+      "closure": "landing",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
+    }
+  ],
+  "obstacles": []
+}
+```
+
+### Available for one operation only
+
+```text
+Location: CYQB
+
+RWY 29 AVBL FOR TKOF ONLY
+```
+
+Available for takeoff only means RWY 29 is closed for landing.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [
+    {
+      "runway": "29",
+      "closure": "landing",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
+    }
+  ],
+  "obstacles": []
+}
+```
+
+### Negative: closed only at stated times
+
+```text
+Location: KLAX
+
+RWY 06L/24R CLSD DLY 0730-1330
+```
+
+The closure applies only in a daily window within the NOTAM's validity, so it is not a closure.
+
+```json
+{
+  "isCanceled": false,
+  "effects": [],
+  "obstacles": []
 }
 ```
 
@@ -660,16 +753,23 @@ A runway closed with exceptions (EXC …, PPR) is recorded as closed. Whether th
   "isCanceled": false,
   "effects": [
     {
-      "runway": "16R/34L",
-      "closure": "full",
-      "closedLength": null,
-      "closedEnd": null,
+      "runway": "16R",
+      "closure": "both",
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
+    },
+    {
+      "runway": "34L",
+      "closure": "both",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -691,8 +791,7 @@ Treatments such as DEICED LIQUID, SANDED, SWEPT and PLOWED are not recorded.
     {
       "runway": "08",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -704,15 +803,14 @@ Treatments such as DEICED LIQUID, SANDED, SWEPT and PLOWED are not recorded.
         "contaminants": [
           {
             "type": "wet",
-            "runwayThird": null,
             "coveragePercent": 100,
             "depth": null
           }
         ]
-      },
-      "obstacle": null
+      }
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -726,7 +824,7 @@ ICE AND 30 PCT 1/8IN DRY SN OVER COMPACTED SN, 10 PCT ICE AND 20 PCT
 COMPACTED SN OBS AT 2511280521.
 ```
 
-Commas separate the thirds, in reporting order. The depth of a layered contaminant is the depth of its top layer.
+Commas separate the thirds. Every third's contaminants are recorded; 10 PCT ICE is reported for all three thirds, so it is recorded once. The depth of a layered contaminant is the depth of its top layer.
 
 ```json
 {
@@ -735,8 +833,7 @@ Commas separate the thirds, in reporting order. The depth of a layered contamina
     {
       "runway": "31",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -748,19 +845,16 @@ Commas separate the thirds, in reporting order. The depth of a layered contamina
         "contaminants": [
           {
             "type": "compactedSnow",
-            "runwayThird": 1,
             "coveragePercent": 10,
             "depth": null
           },
           {
-            "type": "ice",
-            "runwayThird": 1,
-            "coveragePercent": 10,
+            "type": "compactedSnow",
+            "coveragePercent": 20,
             "depth": null
           },
           {
             "type": "drySnowOverCompactedSnow",
-            "runwayThird": 2,
             "coveragePercent": 30,
             "depth": {
               "value": 0.125,
@@ -769,153 +863,14 @@ Commas separate the thirds, in reporting order. The depth of a layered contamina
           },
           {
             "type": "ice",
-            "runwayThird": 2,
-            "coveragePercent": 10,
-            "depth": null
-          },
-          {
-            "type": "compactedSnow",
-            "runwayThird": 3,
-            "coveragePercent": 20,
-            "depth": null
-          },
-          {
-            "type": "ice",
-            "runwayThird": 3,
             "coveragePercent": 10,
             "depth": null
           }
         ]
-      },
-      "obstacle": null
+      }
     }
-  ]
-}
-```
-
-### FICON with cleared width and remainder
-
-```text
-Location: GTF
-
-GTF RWY 03 FICON 5/5/5 40 PCT 1/8IN DRY SN SWEPT 90FT WID
-REMAINDER 1/8IN DRY SN OBS AT 2511280533.
-```
-
-Only the reported width is recorded. The cleared width (90FT WID) and REMAINDER contaminants are not.
-
-```json
-{
-  "isCanceled": false,
-  "effects": [
-    {
-      "runway": "03",
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": {
-        "rwyCC": [
-          5,
-          5,
-          5
-        ],
-        "contaminants": [
-          {
-            "type": "drySnow",
-            "runwayThird": null,
-            "coveragePercent": 40,
-            "depth": {
-              "value": 0.125,
-              "unit": "in"
-            }
-          }
-        ]
-      },
-      "obstacle": null
-    }
-  ]
-}
-```
-
-### FICON without codes
-
-```text
-Location: SLK
-
-SLK RWY 23 FICON 10 PCT ICE 130FT WID OBS AT 2511250948.
-```
-
-```json
-{
-  "isCanceled": false,
-  "effects": [
-    {
-      "runway": "23",
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": {
-        "rwyCC": null,
-        "contaminants": [
-          {
-            "type": "ice",
-            "runwayThird": null,
-            "coveragePercent": 10,
-            "depth": null
-          }
-        ]
-      },
-      "obstacle": null
-    }
-  ]
-}
-```
-
-### Layered contaminant
-
-```text
-Location: BKL
-
-BKL RWY 24L FICON 2/2/2 100 PCT 1/2IN WET SN OVER COMPACTED SN OBS
-AT 2511280256.
-```
-
-```json
-{
-  "isCanceled": false,
-  "effects": [
-    {
-      "runway": "24L",
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": {
-        "rwyCC": [
-          2,
-          2,
-          2
-        ],
-        "contaminants": [
-          {
-            "type": "wetSnowOverCompactedSnow",
-            "runwayThird": null,
-            "coveragePercent": 100,
-            "depth": {
-              "value": 0.5,
-              "unit": "in"
-            }
-          }
-        ]
-      },
-      "obstacle": null
-    }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -935,7 +890,7 @@ REMARK/ RWY 04R SECOND PART RWYCC DOWNGRADED / RWY 04R THIRD PART
 RWYCC DOWNGRADED / RWY 15 FIRST PART RWYCC DOWNGRADED.)
 ```
 
-Each runway line is one effect, and SNOWTAM contaminants are always per third. Depth is NR, so it is null. The RWYCC DOWNGRADED remarks are not recorded.
+Each runway line is one effect. WET is reported for every third at 100 percent, so it is one contaminant. Depth is NR, so it is null. The RWYCC DOWNGRADED remarks are not recorded.
 
 ```json
 {
@@ -944,8 +899,7 @@ Each runway line is one effect, and SNOWTAM contaminants are always per third. D
     {
       "runway": "04L",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -957,31 +911,16 @@ Each runway line is one effect, and SNOWTAM contaminants are always per third. D
         "contaminants": [
           {
             "type": "wet",
-            "runwayThird": 1,
-            "coveragePercent": 100,
-            "depth": null
-          },
-          {
-            "type": "wet",
-            "runwayThird": 2,
-            "coveragePercent": 100,
-            "depth": null
-          },
-          {
-            "type": "wet",
-            "runwayThird": 3,
             "coveragePercent": 100,
             "depth": null
           }
         ]
-      },
-      "obstacle": null
+      }
     },
     {
       "runway": "04R",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -993,31 +932,16 @@ Each runway line is one effect, and SNOWTAM contaminants are always per third. D
         "contaminants": [
           {
             "type": "wet",
-            "runwayThird": 1,
-            "coveragePercent": 100,
-            "depth": null
-          },
-          {
-            "type": "wet",
-            "runwayThird": 2,
-            "coveragePercent": 100,
-            "depth": null
-          },
-          {
-            "type": "wet",
-            "runwayThird": 3,
             "coveragePercent": 100,
             "depth": null
           }
         ]
-      },
-      "obstacle": null
+      }
     },
     {
       "runway": "15",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -1029,27 +953,14 @@ Each runway line is one effect, and SNOWTAM contaminants are always per third. D
         "contaminants": [
           {
             "type": "wet",
-            "runwayThird": 1,
-            "coveragePercent": 100,
-            "depth": null
-          },
-          {
-            "type": "wet",
-            "runwayThird": 2,
-            "coveragePercent": 100,
-            "depth": null
-          },
-          {
-            "type": "wet",
-            "runwayThird": 3,
             "coveragePercent": 100,
             "depth": null
           }
         ]
-      },
-      "obstacle": null
+      }
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -1076,8 +987,7 @@ The SNOWTAM format defines depth in millimetres. Friction coefficients are not r
     {
       "runway": "16",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -1089,25 +999,6 @@ The SNOWTAM format defines depth in millimetres. Friction coefficients are not r
         "contaminants": [
           {
             "type": "drySnow",
-            "runwayThird": 1,
-            "coveragePercent": 100,
-            "depth": {
-              "value": 3,
-              "unit": "mm"
-            }
-          },
-          {
-            "type": "drySnow",
-            "runwayThird": 2,
-            "coveragePercent": 100,
-            "depth": {
-              "value": 3,
-              "unit": "mm"
-            }
-          },
-          {
-            "type": "drySnow",
-            "runwayThird": 3,
             "coveragePercent": 100,
             "depth": {
               "value": 3,
@@ -1115,10 +1006,10 @@ The SNOWTAM format defines depth in millimetres. Friction coefficients are not r
             }
           }
         ]
-      },
-      "obstacle": null
+      }
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -1147,7 +1038,7 @@ RMK: APN APRON I, APRON II, APRON III, APRON IV, APRON V,
 202511251106, ICE. SLIPPERY CONDITIONS.
 ```
 
-Commas separate the thirds. The CRFI friction values and the taxiway and apron remarks are not recorded.
+RSC 16 and RSC 34 are two reports, one effect each. Commas separate the thirds, and each third's coverage differs, so each is a contaminant. The CRFI friction values and the taxiway and apron remarks are not recorded.
 
 ```json
 {
@@ -1156,8 +1047,7 @@ Commas separate the thirds. The CRFI friction values and the taxiway and apron r
     {
       "runway": "16",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -1169,7 +1059,14 @@ Commas separate the thirds. The CRFI friction values and the taxiway and apron r
         "contaminants": [
           {
             "type": "wetSnow",
-            "runwayThird": 1,
+            "coveragePercent": 40,
+            "depth": {
+              "value": 0.125,
+              "unit": "in"
+            }
+          },
+          {
+            "type": "wetSnow",
             "coveragePercent": 50,
             "depth": {
               "value": 0.125,
@@ -1178,31 +1075,19 @@ Commas separate the thirds. The CRFI friction values and the taxiway and apron r
           },
           {
             "type": "wetSnow",
-            "runwayThird": 2,
             "coveragePercent": 70,
-            "depth": {
-              "value": 0.125,
-              "unit": "in"
-            }
-          },
-          {
-            "type": "wetSnow",
-            "runwayThird": 3,
-            "coveragePercent": 40,
             "depth": {
               "value": 0.125,
               "unit": "in"
             }
           }
         ]
-      },
-      "obstacle": null
+      }
     },
     {
       "runway": "34",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
       "surfaceCondition": {
@@ -1214,7 +1099,6 @@ Commas separate the thirds. The CRFI friction values and the taxiway and apron r
         "contaminants": [
           {
             "type": "wetSnow",
-            "runwayThird": 1,
             "coveragePercent": 40,
             "depth": {
               "value": 0.125,
@@ -1223,8 +1107,7 @@ Commas separate the thirds. The CRFI friction values and the taxiway and apron r
           },
           {
             "type": "wetSnow",
-            "runwayThird": 2,
-            "coveragePercent": 70,
+            "coveragePercent": 50,
             "depth": {
               "value": 0.125,
               "unit": "in"
@@ -1232,18 +1115,17 @@ Commas separate the thirds. The CRFI friction values and the taxiway and apron r
           },
           {
             "type": "wetSnow",
-            "runwayThird": 3,
-            "coveragePercent": 50,
+            "coveragePercent": 70,
             "depth": {
               "value": 0.125,
               "unit": "in"
             }
           }
         ]
-      },
-      "obstacle": null
+      }
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -1256,38 +1138,28 @@ JFK OBST CRANE (ASN 2024-AEA-1604-NRA) 403906N0734931W (2.2NM WNW
 JFK) 114FT (100FT AGL) FLAGGED AND LGTD
 ```
 
-In the FAA OBST format `<n>FT (<n>FT AGL)`, the first height is MSL. "WNW" is not a numeric bearing, so bearingDegrees is null. The position is converted from DMS to decimal degrees.
+In the FAA OBST format `<n>FT (<n>FT AGL)`, the first height is MSL, and when both are stated the MSL one is recorded. The reference in that format is the airport, so it is ARP, and WNW is the direction. The position is not recorded.
 
 ```json
 {
   "isCanceled": false,
-  "effects": [
+  "effects": [],
+  "obstacles": [
     {
-      "runway": null,
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": {
-        "heightAGL": {
-          "value": 100,
-          "unit": "ft"
-        },
-        "heightMSL": {
-          "value": 114,
-          "unit": "ft"
-        },
-        "distance": {
-          "value": 2.2,
-          "unit": "nm"
-        },
-        "distanceReference": "JFK",
-        "bearingDegrees": null,
-        "latitude": 40.651667,
-        "longitude": -73.825278
-      }
+      "height": {
+        "value": 114,
+        "unit": "ft",
+        "datum": "MSL"
+      },
+      "distance": {
+        "value": 2.2,
+        "unit": "nm"
+      },
+      "reference": {
+        "kind": "ARP",
+        "runway": null
+      },
+      "direction": "WNW"
     }
   ]
 }
@@ -1302,35 +1174,28 @@ NYL OBST CRANE (ASN UNKNOWN) 323904N1143718W (1NM N APCH END RWY
 03L) UNKNOWN (60FT AGL) FLAGGED
 ```
 
-The MSL height is UNKNOWN, so it is null.
+The MSL height is UNKNOWN, so the AGL height is recorded. APCH END RWY 03L is runway 03L's threshold, and N is the direction from it.
 
 ```json
 {
   "isCanceled": false,
-  "effects": [
+  "effects": [],
+  "obstacles": [
     {
-      "runway": "03L",
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": {
-        "heightAGL": {
-          "value": 60,
-          "unit": "ft"
-        },
-        "heightMSL": null,
-        "distance": {
-          "value": 1,
-          "unit": "nm"
-        },
-        "distanceReference": "APCH END RWY 03L",
-        "bearingDegrees": null,
-        "latitude": 32.651111,
-        "longitude": -114.621667
-      }
+      "height": {
+        "value": 60,
+        "unit": "ft",
+        "datum": "AGL"
+      },
+      "distance": {
+        "value": 1,
+        "unit": "nm"
+      },
+      "reference": {
+        "kind": "threshold",
+        "runway": "03L"
+      },
+      "direction": "N"
     }
   ]
 }
@@ -1346,33 +1211,28 @@ ERECTED AT PSN 521700.1N0044411.0E, 2000M BEYOND TORA RWY 18C ON
 EXTD RCL, 138FT AMSL, MARKED AND LGTD.
 ```
 
+Beyond the end of TORA RWY 18C is beyond its departure end. The text gives no compass direction, so direction is null.
+
 ```json
 {
   "isCanceled": false,
-  "effects": [
+  "effects": [],
+  "obstacles": [
     {
-      "runway": "18C",
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": {
-        "heightAGL": null,
-        "heightMSL": {
-          "value": 138,
-          "unit": "ft"
-        },
-        "distance": {
-          "value": 2000,
-          "unit": "m"
-        },
-        "distanceReference": "TORA RWY 18C",
-        "bearingDegrees": null,
-        "latitude": 52.283361,
-        "longitude": 4.736389
-      }
+      "height": {
+        "value": 138,
+        "unit": "ft",
+        "datum": "MSL"
+      },
+      "distance": {
+        "value": 2000,
+        "unit": "m"
+      },
+      "reference": {
+        "kind": "departureEnd",
+        "runway": "18C"
+      },
+      "direction": null
     }
   ]
 }
@@ -1391,38 +1251,28 @@ ELEV : 572FT
 LIGHTING : NONE
 ```
 
-HEIGHT is above ground and ELEV is above sea level. RDL 114 is a numeric bearing from the ARP.
+HEIGHT is above ground and ELEV is above sea level; both are stated, so the elevation is recorded. RDL 114 is a bearing in degrees from the ARP.
 
 ```json
 {
   "isCanceled": false,
-  "effects": [
+  "effects": [],
+  "obstacles": [
     {
-      "runway": null,
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": {
-        "heightAGL": {
-          "value": 92,
-          "unit": "ft"
-        },
-        "heightMSL": {
-          "value": 572,
-          "unit": "ft"
-        },
-        "distance": {
-          "value": 0.62,
-          "unit": "nm"
-        },
-        "distanceReference": "ARP LFST",
-        "bearingDegrees": 114,
-        "latitude": 48.5375,
-        "longitude": 7.648611
-      }
+      "height": {
+        "value": 572,
+        "unit": "ft",
+        "datum": "MSL"
+      },
+      "distance": {
+        "value": 0.62,
+        "unit": "nm"
+      },
+      "reference": {
+        "kind": "ARP",
+        "runway": null
+      },
+      "direction": 114
     }
   ]
 }
@@ -1445,7 +1295,8 @@ An obstacle named in an approach-procedure NOTAM is not a takeoff obstacle, so i
 ```json
 {
   "isCanceled": false,
-  "effects": []
+  "effects": [],
+  "obstacles": []
 }
 ```
 
@@ -1457,7 +1308,7 @@ Location: KTKI
 RWY 18 THR RELOCATED 1040FT S DECLARED DIST: TORA 5962FT TODA 5962FT ASDA 6462FT LDA 6462FT
 ```
 
-A relocated threshold shortens the runway just as a displaced one does, so it is recorded as thresholdDisplacement.
+A relocated threshold shortens the runway just as a displaced one does, so it is recorded as thresholdDisplacement. TODA and ASDA are not recorded.
 
 ```json
 {
@@ -1466,8 +1317,7 @@ A relocated threshold shortens the runway just as a displaced one does, so it is
     {
       "runway": "18",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": {
         "value": 1040,
         "unit": "ft"
@@ -1477,23 +1327,15 @@ A relocated threshold shortens the runway just as a displaced one does, so it is
           "value": 5962,
           "unit": "ft"
         },
-        "TODA": {
-          "value": 5962,
-          "unit": "ft"
-        },
-        "ASDA": {
-          "value": 6462,
-          "unit": "ft"
-        },
         "LDA": {
           "value": 6462,
           "unit": "ft"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -1514,43 +1356,36 @@ Declared distances given for a pair apply to each direction.
     {
       "runway": "12R",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": {
         "value": 160,
         "unit": "m"
       },
       "declaredDistances": {
         "TORA": null,
-        "TODA": null,
-        "ASDA": null,
         "LDA": {
           "value": 320,
           "unit": "m"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     },
     {
       "runway": "30L",
       "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": {
         "TORA": null,
-        "TODA": null,
-        "ASDA": null,
         "LDA": {
           "value": 320,
           "unit": "m"
         }
       },
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -1572,7 +1407,8 @@ Distances from TWY B are for intersection takeoffs, not declared distances, and 
 ```json
 {
   "isCanceled": false,
-  "effects": []
+  "effects": [],
+  "obstacles": []
 }
 ```
 
@@ -1589,23 +1425,30 @@ FOR CARGO ACFT AND HELICOPTERS, IF LANDING DIRECTION IS 36 TFCS
 SHALL PLAN TO TOUCH DOWN BEYOND THE HOOK BARRIER.
 ```
 
-The SF50 is a jet, so a closure to jet traffic applies to it.
+The SF50 is a jet, so a closure to jet traffic applies to it, in each direction.
 
 ```json
 {
   "isCanceled": false,
   "effects": [
     {
-      "runway": "18/36",
-      "closure": "full",
-      "closedLength": null,
-      "closedEnd": null,
+      "runway": "18",
+      "closure": "both",
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
+    },
+    {
+      "runway": "36",
+      "closure": "both",
+      "partialClosure": null,
+      "thresholdDisplacement": null,
+      "declaredDistances": null,
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -1625,25 +1468,22 @@ The SF50 is a fixed-wing aircraft, so the closure applies to it.
   "effects": [
     {
       "runway": "02",
-      "closure": "full",
-      "closedLength": null,
-      "closedEnd": null,
+      "closure": "both",
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     },
     {
       "runway": "20",
-      "closure": "full",
-      "closedLength": null,
-      "closedEnd": null,
+      "closure": "both",
+      "partialClosure": null,
       "thresholdDisplacement": null,
       "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": null
+      "surfaceCondition": null
     }
-  ]
+  ],
+  "obstacles": []
 }
 ```
 
@@ -1659,38 +1499,28 @@ TEMPORARY CRANE 4739 FT FROM DER, 785FT RIGHT OF CENTERLINE, 170FT AGL/440FT MSL
 ALL OTHER DATA REMAINS AS PUBLISHED. 2606041852-2701141852EST
 ```
 
-Departure-procedure obstacles are takeoff obstacles, unlike obstacles named in approach procedures. The climb gradient is not recorded.
+Departure-procedure obstacles are takeoff obstacles, unlike obstacles named in approach procedures. The distance is from RWY 19's departure end; RIGHT OF CENTERLINE is not a direction. The climb gradient is not recorded.
 
 ```json
 {
   "isCanceled": false,
-  "effects": [
+  "effects": [],
+  "obstacles": [
     {
-      "runway": "19",
-      "closure": "none",
-      "closedLength": null,
-      "closedEnd": null,
-      "thresholdDisplacement": null,
-      "declaredDistances": null,
-      "surfaceCondition": null,
-      "obstacle": {
-        "heightAGL": {
-          "value": 170,
-          "unit": "ft"
-        },
-        "heightMSL": {
-          "value": 440,
-          "unit": "ft"
-        },
-        "distance": {
-          "value": 4739,
-          "unit": "ft"
-        },
-        "distanceReference": "DER",
-        "bearingDegrees": null,
-        "latitude": null,
-        "longitude": null
-      }
+      "height": {
+        "value": 440,
+        "unit": "ft",
+        "datum": "MSL"
+      },
+      "distance": {
+        "value": 4739,
+        "unit": "ft"
+      },
+      "reference": {
+        "kind": "departureEnd",
+        "runway": "19"
+      },
+      "direction": null
     }
   ]
 }
@@ -1714,7 +1544,8 @@ A cancellation has no effects, even though the cancelled text describes a closur
 ```json
 {
   "isCanceled": true,
-  "effects": []
+  "effects": [],
+  "obstacles": []
 }
 ```
 
@@ -1729,23 +1560,8 @@ RWY 14 PAPI U/S
 ```json
 {
   "isCanceled": false,
-  "effects": []
-}
-```
-
-### Negative: taxiway FICON
-
-```text
-Location: FAI
-
-FAI TWY U, V, W FICON 5IN DRY SN OVER COMPACTED SN OBS AT
-2511241642.
-```
-
-```json
-{
-  "isCanceled": false,
-  "effects": []
+  "effects": [],
+  "obstacles": []
 }
 ```
 
@@ -1763,6 +1579,7 @@ The text says the threshold is back to normal. 3000FT is the displacement being 
 ```json
 {
   "isCanceled": false,
-  "effects": []
+  "effects": [],
+  "obstacles": []
 }
 ```

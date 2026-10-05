@@ -7,7 +7,7 @@ from tests.factories import effect, extraction
 
 @pytest.fixture
 def silver():
-    return extraction(effect("28L", "full"))
+    return extraction(effect("28L", "both"))
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def review(client, status, value=None, note=None):
 
 def test_saving_records_whether_the_silver_label_was_edited(client, silver):
     assert review(client, "edited", silver).json() == {"status": "accepted", "edited": False}
-    assert review(client, "accepted", extraction(effect("10R", "full"))).json() == {"status": "edited", "edited": True}
+    assert review(client, "accepted", extraction(effect("10R", "both"))).json() == {"status": "edited", "edited": True}
     current = client.get("/api/notam", params={"key": "KSFO A1/2026"}).json()["review"]
     assert (current["status"], current["reviewer"]) == ("edited", "Tester")
 
@@ -48,3 +48,30 @@ def test_a_placeholder_review_leaves_its_notam_in_the_unreviewed_queue(client, g
     assert [item["status"] for item in client.get("/api/queue").json()["items"]] == ["unreviewed"]
     review(client, "accepted", silver)
     assert [item["status"] for item in client.get("/api/queue").json()["items"]] == ["accepted"]
+
+
+def test_labels_in_the_old_schema_are_shown_in_the_current_one(gold_db):
+    key = gold_db.add_notam("A3/2026", text="RWY 09/27 CLSD")
+    old_shape = {
+        "isCanceled": False,
+        "effects": [
+            {
+                "runway": "09/27",
+                "closure": "full",
+                "closedLength": None,
+                "closedEnd": None,
+                "thresholdDisplacement": None,
+                "declaredDistances": None,
+                "surfaceCondition": None,
+                "obstacle": None,
+            }
+        ],
+    }
+    gold_db.add_silver(key, old_shape)
+    gold_db.add_review(key, "accepted", old_shape)
+    gold_db.connection.commit()
+    client = TestClient(create_app(gold_db.path, "Tester"))
+    shown = client.get("/api/notam", params={"key": key}).json()
+    assert shown["silverA"]["extraction"] == extraction(effect("09", "both"), effect("27", "both"))
+    assert shown["silverA"]["problems"] == []
+    assert shown["review"]["extraction"] == shown["silverA"]["extraction"]

@@ -1,44 +1,34 @@
-from tests.factories import effect, extraction, length, obstacle
+from tests.factories import effect, extraction, height, length, obstacle, partial, reference
 from training.label_rules import corrected
 
 
-def test_a_closure_for_landing_only_is_not_a_closure():
-    label = extraction(effect("20", "full"))
-    assert corrected(label, "RWY 02/20 WIP. RWY 20 CLSD LDG, AVBL TKOF FM TWY A4.") == extraction()
-
-
-def test_a_closure_written_operation_first_is_not_a_closure():
-    label = extraction(effect("16R", "full"))
-    assert corrected(label, "LDG RWY 16R NOT AVBL DUE WIP") == extraction()
-
-
-def test_keeps_an_outright_closure_of_the_same_runway():
-    label = extraction(effect("20", "full"))
-    assert corrected(label, "RWY 20 CLSD LDG 0600-1200. RWY 20 CLSD 1200-1800.") == label
-
-
-def test_keeps_what_else_an_effect_states():
-    label = extraction(effect("20", "full", thresholdDisplacement=length(300)))
-    assert corrected(label, "RWY 20 CLSD FOR LDG. THR 20 DSPLCD 300FT.") == extraction(
-        effect("20", thresholdDisplacement=length(300))
-    )
-
-
 def test_an_en_route_obstacle_list_records_no_obstacle():
-    label = extraction(effect(None, obstacle=obstacle(heightAGL=length(390))))
+    label = extraction(obstacles=[obstacle(height=height(390))])
     text = "LOW FLYING ZONE BOAT CENTRO SUD OBSTACLES NEW OBST ERECTED: RADIO LINK TOWER HGT AGL 390FT"
     assert corrected(label, text) == extraction()
 
 
 def test_an_aerodrome_obstacle_is_kept():
-    label = extraction(effect("24L", obstacle=obstacle(heightAGL=length(315))))
+    label = extraction(obstacles=[obstacle(height(375, datum="MSL"), length(430), reference("threshold", "24L"))])
     assert corrected(label, "TOWER CRANE APRX 430FT BFR THR 24L. 315FT AGL 375FT AMSL.") == label
 
 
 def test_a_closure_after_the_last_scheduled_flight_is_not_a_closure():
-    label = extraction(effect("16/34", "full"))
+    label = extraction(effect("16", "both"), effect("34", "both"))
     text = "RWY 16/34 CLSD AFTER LAST SKED INTL ARR DUE WIP. AVBL WITH 60 MIN PN TO ATC"
     assert corrected(label, text) == extraction()
+
+
+def test_a_portion_closed_after_the_last_scheduled_flight_is_not_a_closure():
+    label = extraction(effect("07", partialClosure=partial(length(500), "thresholdEnd")))
+    assert corrected(label, "RWY 07 CLSD AFTER LAST SKED FLT FIRST 500FT") == extraction()
+
+
+def test_keeps_what_else_an_effect_states():
+    label = extraction(effect("20", "both", thresholdDisplacement=length(300)))
+    assert corrected(label, "RWY 20 CLSD AFTER LAST SKED FLT. THR 20 DSPLCD 300FT.") == extraction(
+        effect("20", thresholdDisplacement=length(300))
+    )
 
 
 def test_a_further_displacement_without_its_total_records_no_displacement():

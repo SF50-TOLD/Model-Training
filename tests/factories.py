@@ -5,42 +5,44 @@ def length(value, unit="ft"):
     return {"value": value, "unit": unit}
 
 
+def height(value, unit="ft", datum="AGL"):
+    return {"value": value, "unit": unit, "datum": datum}
+
+
 def effect(runway="09", closure="none", **fields):
     return {
         "runway": runway,
         "closure": closure,
-        "closedLength": None,
-        "closedEnd": None,
+        "partialClosure": None,
         "thresholdDisplacement": None,
         "declaredDistances": None,
         "surfaceCondition": None,
-        "obstacle": None,
     } | fields
 
 
-def declared(TORA=None, TODA=None, ASDA=None, LDA=None):  # noqa: N803
-    return {"TORA": TORA, "TODA": TODA, "ASDA": ASDA, "LDA": LDA}
+def partial(length=None, end=None):  # noqa: A002
+    return {"length": length, "end": end}
 
 
-def contaminant(type="wet", runwayThird=None, coveragePercent=None, depth=None):  # noqa: A002, N803
-    return {"type": type, "runwayThird": runwayThird, "coveragePercent": coveragePercent, "depth": depth}
+def declared(TORA=None, LDA=None):  # noqa: N803
+    return {"TORA": TORA, "LDA": LDA}
+
+
+def contaminant(type="wet", coveragePercent=None, depth=None):  # noqa: A002, N803
+    return {"type": type, "coveragePercent": coveragePercent, "depth": depth}
 
 
 def surface(rwyCC=None, contaminants=()):  # noqa: N803
     return {"rwyCC": rwyCC, "contaminants": list(contaminants)}
 
 
-def obstacle(**fields):
-    return {
-        "heightAGL": None,
-        "heightMSL": None,
-        "distance": None,
-        "distanceReference": None,
-        "bearingDegrees": None,
-        "latitude": None,
-        "longitude": None,
-    } | fields
+def reference(kind="ARP", runway=None):
+    return {"kind": kind, "runway": runway}
 
 
-def extraction(*effects, isCanceled=False):  # noqa: N803
-    return {"isCanceled": isCanceled, "effects": list(effects)}
+def obstacle(height=None, distance=None, reference=None, direction=None):  # noqa: A002
+    return {"height": height, "distance": distance, "reference": reference, "direction": direction}
+
+
+def extraction(*effects, obstacles=(), isCanceled=False):  # noqa: N803
+    return {"isCanceled": isCanceled, "effects": list(effects), "obstacles": list(obstacles)}

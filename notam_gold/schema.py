@@ -8,13 +8,15 @@ from jsonschema import Draft202012Validator
 
 from notam_gold.paths import SCHEMA_FILE
 
-CLOSURE_ORDER = {"none": 0, "full": 1, "partial": 2}
 RELATIVE_ENDS = ("thresholdEnd", "departureEnd")
+SHORTENING_FIELDS = ("partialClosure", "thresholdDisplacement", "declaredDistances")
+RUNWAY_END_REFERENCES = ("departureEnd", "threshold")
+_FACT_FIELDS = (*SHORTENING_FIELDS, "surfaceCondition")
 
 
 @dataclass(frozen=True)
 class Problem:
-    """A validation failure at a JSON path such as ``effects[0].closedLength``."""
+    """A validation failure at a JSON path such as ``effects[0].partialClosure.length``."""
 
     path: str
     message: str
@@ -61,82 +63,60 @@ def validate(extraction: dict) -> list[Problem]:
 
 
 def _semantic_problems(extraction: dict):
-    effects = extraction["effects"]
-    if extraction["isCanceled"] and effects:
-        yield Problem("effects", "A cancelled NOTAM has no effects")
+    effects, obstacles = extraction["effects"], extraction["obstacles"]
+    if extraction["isCanceled"]:
+        if effects:
+            yield Problem("effects", "A cancelled NOTAM has no effects")
+        if obstacles:
+            yield Problem("obstacles", "A cancelled NOTAM has no obstacles")
     seen = set()
-    closed = _fully_closed_directions(effects)
     for index, effect in enumerate(effects):
-        if _directions(effect["runway"]) & closed and _shortens(effect):
-            yield Problem(f"effects[{index}]", "A fully closed runway takes no shortening; remove this effect")
-        yield from _effect_problems(f"effects[{index}]", effect)
-        key = json.dumps(effect, sort_keys=True)
-        if key in seen:
-            yield Problem(f"effects[{index}]", "Duplicate effect")
-        seen.add(key)
-        for earlier in effects[:index]:
-            if effect["runway"] is not None and effect["runway"] == earlier["runway"] and _combinable(effect, earlier):
-                yield Problem(f"effects[{index}]", f"Combine this with the other effect for runway {effect['runway']}")
-                break
-
-
-def _combinable(first: dict, second: dict) -> bool:
-    """Two effects that state different facts, which therefore belong in one effect for their runway."""
-    both_closed = first["closure"] != "none" and second["closure"] != "none"
-    return not both_closed and not any(first[f] is not None and second[f] is not None for f in _FACT_FIELDS)
-
-
-def _directions(runway: str | None) -> set[str]:
-    return set(runway.split("/")) if runway else set()
-
-
-def _fully_closed_directions(effects: list[dict]) -> set[str]:
-    return set().union(*(_directions(e["runway"]) for e in effects if e["closure"] == "full"))
-
-
-def _shortens(effect: dict) -> bool:
-    return effect["closure"] == "partial" or any(
-        effect[f] is not None for f in ("thresholdDisplacement", "declaredDistances")
-    )
-
-
-def _is_single_direction(runway: str | None) -> bool:
-    return runway is not None and "/" not in runway
+        path = f"effects[{index}]"
+        if effect["runway"] in seen:
+            yield Problem(path, f"Combine this with the other effect for runway {effect['runway'] or 'the aerodrome'}")
+        seen.add(effect["runway"])
+        yield from _effect_problems(path, effect)
+    for index, obstacle in enumerate(obstacles):
+        yield from _obstacle_problems(f"obstacles[{index}]", obstacle)
 
 
 def _effect_problems(path: str, effect: dict):
-    if effect["closure"] != "partial":
-        for field in ("closedLength", "closedEnd"):
-            if effect[field] is not None:
-                yield Problem(f"{path}.{field}", f'{field} requires closure "partial"')
-    for field in ("declaredDistances", "thresholdDisplacement"):
-        if effect[field] is not None and not _is_single_direction(effect["runway"]):
-            yield Problem(f"{path}.runway", f"{field} requires a single-direction runway")
-    if effect["closedEnd"] in RELATIVE_ENDS and not _is_single_direction(effect["runway"]):
-        yield Problem(f"{path}.closedEnd", f"{effect['closedEnd']} requires a single-direction runway")
     if effect["closure"] == "none" and all(effect[f] is None for f in _FACT_FIELDS):
         yield Problem(path, "Effect states nothing; remove it")
-    for field in ("closedLength", "thresholdDisplacement"):
-        yield from _positive(f"{path}.{field}", effect[field])
+    yield from _closure_problems(path, effect)
+    if effect["runway"] is None:
+        for field in SHORTENING_FIELDS:
+            if effect[field] is not None:
+                yield Problem(f"{path}.runway", f"{field} requires a runway")
+    if (portion := effect["partialClosure"]) is not None:
+        yield from _positive(f"{path}.partialClosure.length", portion["length"])
+    yield from _positive(f"{path}.thresholdDisplacement", effect["thresholdDisplacement"])
     if (distances := effect["declaredDistances"]) is not None:
-        if all(value is None for value in distances.values()):
-            yield Problem(f"{path}.declaredDistances", "No declared distance stated; use null")
-        for name, length in distances.items():
-            yield from _positive(f"{path}.declaredDistances.{name}", length)
+        yield from _declared_problems(f"{path}.declaredDistances", distances)
     if (condition := effect["surfaceCondition"]) is not None:
         yield from _surface_problems(f"{path}.surfaceCondition", condition)
-    if (obstacle := effect["obstacle"]) is not None:
-        yield from _obstacle_problems(f"{path}.obstacle", obstacle)
 
 
-_FACT_FIELDS = (
-    "closedLength",
-    "closedEnd",
-    "thresholdDisplacement",
-    "declaredDistances",
-    "surfaceCondition",
-    "obstacle",
-)
+def _closure_problems(path: str, effect: dict):
+    closure = effect["closure"]
+    if closure == "both":
+        for field in SHORTENING_FIELDS:
+            if effect[field] is not None:
+                yield Problem(f"{path}.{field}", "A runway closed for takeoff and landing takes no shortening")
+        return
+    distances = effect["declaredDistances"] or {}
+    for operation, distance in (("takeoff", "TORA"), ("landing", "LDA")):
+        if closure == operation and distances.get(distance) is not None:
+            yield Problem(
+                f"{path}.declaredDistances.{distance}", f"A runway closed for {operation} has no {distance}; use null"
+            )
+
+
+def _declared_problems(path: str, distances: dict):
+    if all(value is None for value in distances.values()):
+        yield Problem(path, "No declared distance stated; use null")
+    for name, distance in distances.items():
+        yield from _positive(f"{path}.{name}", distance)
 
 
 def _positive(path: str, measure: dict | None):
@@ -148,48 +128,61 @@ def _surface_problems(path: str, condition: dict):
     codes = condition["rwyCC"]
     if codes is not None and len(codes) not in (1, 3):
         yield Problem(f"{path}.rwyCC", "Report one code or one per third")
-    thirds = [c["runwayThird"] for c in condition["contaminants"]]
-    if any(t is None for t in thirds) and any(t is not None for t in thirds):
-        yield Problem(f"{path}.contaminants", "Give every contaminant a runwayThird, or none of them")
     for index, contaminant in enumerate(condition["contaminants"]):
         yield from _positive(f"{path}.contaminants[{index}].depth", contaminant["depth"])
 
 
 def _obstacle_problems(path: str, obstacle: dict):
-    if all(value is None for value in obstacle.values()):
-        yield Problem(path, "Obstacle states nothing; use null")
-    if obstacle["distanceReference"] is not None and obstacle["distance"] is None:
-        yield Problem(f"{path}.distanceReference", "A reference needs a stated distance; use null")
-    if (obstacle["latitude"] is None) != (obstacle["longitude"] is None):
-        yield Problem(f"{path}.latitude", "Latitude and longitude come as a pair")
-    for field in ("heightAGL", "heightMSL", "distance"):
+    if obstacle["height"] is None and obstacle["distance"] is None:
+        yield Problem(path, "Obstacle states nothing; remove it")
+    for field in ("height", "distance"):
         yield from _positive(f"{path}.{field}", obstacle[field])
+    reference = obstacle["reference"]
+    if (obstacle["distance"] is None) != (reference is None):
+        yield Problem(f"{path}.reference", "A distance and its reference come as a pair")
+    if reference is not None and (reference["kind"] in RUNWAY_END_REFERENCES) != (reference["runway"] is not None):
+        yield Problem(f"{path}.reference.runway", "A runway end names its runway; ARP and other references name none")
 
 
 def _effect_sort_key(effect: dict):
     runway = effect["runway"]
+    return runway is not None, runway or ""
+
+
+def _obstacle_sort_key(obstacle: dict):
+    reference = obstacle["reference"] or {}
     return (
-        runway is not None,
-        runway or "",
-        CLOSURE_ORDER[effect["closure"]],
-        effect["thresholdDisplacement"] is not None,
-        effect["declaredDistances"] is not None,
-        effect["surfaceCondition"] is not None,
-        effect["obstacle"] is not None,
+        reference.get("runway") or "",
+        reference.get("kind") or "",
+        (obstacle["height"] or {}).get("value", 0),
+        (obstacle["distance"] or {}).get("value", 0),
+        str(obstacle["direction"]),
     )
 
 
 def _contaminant_sort_key(contaminant: dict):
-    third = contaminant["runwayThird"]
-    return third is not None, third or 0, contaminant["type"]
+    depth = contaminant["depth"] or {}
+    coverage = contaminant["coveragePercent"]
+    return contaminant["type"], -1 if coverage is None else coverage, depth.get("value", -1), depth.get("unit", "")
+
+
+def _distinct(contaminants: list[dict]) -> list[dict]:
+    seen, kept = set(), []
+    for contaminant in contaminants:
+        key = json.dumps(contaminant, sort_keys=True)
+        if key not in seen:
+            seen.add(key)
+            kept.append(contaminant)
+    return kept
 
 
 def canonicalize(extraction: dict) -> dict:
-    """A copy with effects and contaminants in the canonical order defined in SCHEMA.md."""
+    """A copy with effects, obstacles and contaminants in the canonical order defined in SCHEMA.md."""
     effects = []
     for effect in sorted(extraction["effects"], key=_effect_sort_key):
         if (condition := effect["surfaceCondition"]) is not None:
-            contaminants = sorted(condition["contaminants"], key=_contaminant_sort_key)
+            contaminants = sorted(_distinct(condition["contaminants"]), key=_contaminant_sort_key)
             effect = {**effect, "surfaceCondition": {**condition, "contaminants": contaminants}}
         effects.append(effect)
-    return {**extraction, "effects": effects}
+    obstacles = sorted(extraction["obstacles"], key=_obstacle_sort_key)
+    return {**extraction, "effects": effects, "obstacles": obstacles}

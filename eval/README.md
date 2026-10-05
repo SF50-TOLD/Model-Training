@@ -3,7 +3,7 @@
 These files contain reviewed NOTAM extractions for Xcode's Evaluations framework. `export_gold.py` generates them; don't edit them by hand.
 
 | File | Contents |
-|---|---|
+| --- | --- |
 | `notam_gold.jsonl` | Every NOTAM whose review was accepted or edited |
 | `notam_dev.jsonl` | About 40% of them, for tuning instructions |
 | `notam_test.jsonl` | The other 60%, held out for the accuracy gate |
@@ -12,11 +12,11 @@ These files contain reviewed NOTAM extractions for Xcode's Evaluations framework
 Each sample line is a `ModelSample`:
 
 ```json
-{"input": {"prompt": "Location: KSFO\n\nSFO RWY 28L DECLARED DIST: …"}, "output": {"value": {"isCanceled": false, "effects": […]}}}
+{"input": {"prompt": "Location: KSFO\n\nSFO RWY 28L DECLARED DIST: …"}, "output": {"value": {"isCanceled": false, "effects": […], "obstacles": […]}}}
 ```
 
 - `prompt` is exactly what the app sends: `Location: <icao_location>`, a blank line, then the NOTAM text as the NOTAM API returns it.
-- `value` follows [`schema/notam_extraction.schema.json`](../schema/notam_extraction.schema.json). Every key is present, `null` means the NOTAM doesn't state that fact, and effects and contaminants are in canonical order.
+- `value` follows [`schema/notam_extraction.schema.json`](../schema/notam_extraction.schema.json). Every key is present, `null` means the NOTAM doesn't state that fact, and effects, obstacles and contaminants are in canonical order.
 - There is no `instructions` key; the app supplies its own.
 
 Each `.jsonl` file has a matching `.meta.jsonl` file. Meta line *n* describes sample line *n*, and carries these fields:

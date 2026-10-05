@@ -2,8 +2,19 @@
 
 from playwright.sync_api import expect
 
-from tests.e2e.site import BZN, DTW, JNU, LIRR, MSN, ORD, ORD_NEW_RULES, QUEUE, SFO, SFO_LABEL, TPA, after
-from tests.factories import contaminant, declared, effect, extraction, length, obstacle, surface
+from tests.e2e.site import BZN, DTW, JNU, LIRR, LIRR_RUN_B, MSN, ORD, ORD_NEW_RULES, QUEUE, SFO, SFO_LABEL, TPA, after
+from tests.factories import (
+    contaminant,
+    declared,
+    effect,
+    extraction,
+    height,
+    length,
+    obstacle,
+    partial,
+    reference,
+    surface,
+)
 
 
 def test_opens_on_re_reviews_then_one_notam_per_stratum(review):
@@ -156,15 +167,16 @@ def test_a_reviewed_notam_reopens_with_its_saved_label(review):
 
 def test_a_field_disagreement_shows_run_b_and_can_take_it(review, gold_db):
     review.go_to(DTW)
-    closed_length = review.field("Closed length")
+    card = review.effect(1)
+    closed_length = review.field("Length", card)
     expect(closed_length.locator(".flag")).to_contain_text("Run B: 1700 ft")
     closed_length.get_by_role("button", name="Use run B").click()
-    expect(review.page.get_by_role("spinbutton", name="Closed length")).to_have_value("1700")
+    expect(card.get_by_role("spinbutton", name="Length")).to_have_value("1700")
     review.press("a")
     review.expect_on(after(DTW))
     [saved] = gold_db.reviews(DTW)
     assert saved["status"] == "edited"
-    assert saved["extraction"]["effects"][0]["closedLength"] == length(1700)
+    assert saved["extraction"]["effects"][0]["partialClosure"]["length"] == length(1700)
 
 
 def test_an_effect_only_run_b_found_can_be_added(review, gold_db):
@@ -179,13 +191,18 @@ def test_an_effect_only_run_b_found_can_be_added(review, gold_db):
     )
 
 
-def test_all_of_run_bs_extra_effects_can_be_added_at_once(review):
+def test_all_of_run_bs_extra_effects_and_obstacles_can_be_added_at_once(review, gold_db):
     review.go_to(LIRR)
-    review.page.get_by_role("button", name="Add all 2 of run B's extra effects").click()
-    expect(review.page.locator("fieldset.effect")).to_have_count(2)
-    heights = review.page.get_by_role("spinbutton", name="Height AGL")
-    expect(heights.nth(0)).to_have_value("60")
-    expect(heights.nth(1)).to_have_value("45")
+    expect(review.page.get_by_text("No obstacles.")).to_be_visible()
+    review.page.get_by_role("button", name="Add all 2 of run B's extras").click()
+    expect(review.page.locator("fieldset.effect")).to_have_count(1)
+    expect(review.page.get_by_role("textbox", name="Runway")).to_have_value("16")
+    expect(review.page.locator("fieldset.obstacle")).to_have_count(1)
+    expect(review.page.get_by_role("spinbutton", name="Height")).to_have_value("60")
+    expect(review.page.get_by_role("combobox", name="Direction")).to_have_value("WNW")
+    review.press("s")
+    review.expect_on(after(LIRR))
+    assert gold_db.reviews(LIRR)[0]["extraction"] == LIRR_RUN_B
 
 
 def test_effects_can_be_removed(review, gold_db):
@@ -204,16 +221,18 @@ def test_building_a_closure_and_declared_distances_from_scratch(review, gold_db)
     review.page.get_by_role("button", name="Add effect").click()
     card = review.effect(1)
     card.get_by_role("textbox", name="Runway").fill("14")
-    review.choose_closure("partial", card)
-    review.field("Closed length", card).get_by_label("Stated").check()
-    card.get_by_role("spinbutton", name="Closed length").fill("500")
-    card.get_by_role("combobox", name="Closed length unit").select_option("m")
-    card.get_by_role("combobox", name="Closed end").select_option(label="N")
+    review.choose_closure("landing", card)
+    card.get_by_label("Partial closure").check()
+    review.field("Length", card).get_by_label("Stated").check()
+    card.get_by_role("spinbutton", name="Length").fill("500")
+    card.get_by_role("combobox", name="Length unit").select_option("m")
+    card.get_by_role("combobox", name="End").select_option(label="N")
     review.field("Threshold displacement", card).get_by_label("Stated").check()
     card.get_by_role("spinbutton", name="Threshold displacement").fill("200")
     card.get_by_label("Declared distances").check()
-    review.field("LDA", card).get_by_label("Stated").check()
-    card.get_by_role("spinbutton", name="LDA").fill("3000")
+    expect(card.get_by_text("TODA")).to_have_count(0)
+    review.field("TORA", card).get_by_label("Stated").check()
+    card.get_by_role("spinbutton", name="TORA").fill("3000")
     review.leave_field()
     review.press("s")
     expect(review.message).to_have_text(f"Saved {MSN} as edited.")
@@ -222,11 +241,10 @@ def test_building_a_closure_and_declared_distances_from_scratch(review, gold_db)
     assert saved["extraction"] == extraction(
         effect(
             "14",
-            "partial",
-            closedLength=length(500, "m"),
-            closedEnd="N",
+            "landing",
+            partialClosure=partial(length(500, "m"), "N"),
             thresholdDisplacement=length(200),
-            declaredDistances=declared(LDA=length(3000)),
+            declaredDistances=declared(TORA=length(3000)),
         )
     )
 
@@ -253,53 +271,52 @@ def test_editing_a_surface_condition_and_its_contaminants(review, gold_db):
             "08",
             surfaceCondition=surface(
                 [5, 3, 3],
-                [contaminant("wet", None, 100), contaminant("ice", None, 10, {"value": 0.125, "unit": "in"})],
+                [contaminant("wet", 100), contaminant("ice", 10, {"value": 0.125, "unit": "in"})],
             ),
         )
     )
 
 
-def test_per_third_contaminants_must_all_have_a_third(review):
-    review.go_to(JNU)
-    card = review.effect(1)
-    card.get_by_role("button", name="Add contaminant").click()
-    card.locator(".contaminant").nth(0).get_by_role("spinbutton", name="Third").fill("1")
-    expect(card.locator(".contaminants > .problem")).to_have_text(
-        "Give every contaminant a runwayThird, or none of them"
-    )
-
-
-def test_an_obstacle_position_can_be_pasted_as_dms(review, gold_db):
+def test_an_obstacle_referenced_to_a_runway_end_needs_its_runway(review, gold_db):
     review.go_to(MSN)
-    review.page.get_by_role("button", name="Add effect").click()
-    card = review.effect(1)
-    card.get_by_label("Obstacle").check()
-    review.field("Height AGL", card).get_by_label("Stated").check()
-    card.get_by_role("spinbutton", name="Height AGL").fill("100")
-    card.get_by_label("Paste a DMS position").fill("403906N0734931W")
-    card.get_by_label("Paste a DMS position").press("Tab")
-    expect(card.get_by_role("spinbutton", name="Latitude")).to_have_value("40.651667")
-    expect(card.get_by_role("spinbutton", name="Longitude")).to_have_value("-73.825278")
-    card.get_by_role("textbox", name="Runway").fill("")
+    review.page.get_by_role("button", name="Add obstacle").click()
+    card = review.obstacle(1)
+    review.field("Height", card).get_by_label("Stated").check()
+    card.get_by_role("spinbutton", name="Height").fill("100")
+    card.get_by_role("combobox", name="Height datum").select_option("MSL")
+    review.field("Distance", card).get_by_label("Stated").check()
+    card.get_by_role("spinbutton", name="Distance").fill("1.2")
+    card.get_by_role("combobox", name="Distance from").select_option(label="Threshold of runway…")
+    card.get_by_role("combobox", name="Direction").select_option(label="Degrees…")
+    card.get_by_role("spinbutton", name="Direction degrees").fill("270")
+    review.leave_field()
+    expect(review.field("Distance from", card).locator(".problem")).to_have_text(
+        "A runway end names its runway; ARP and other references name none"
+    )
+    review.press("s")
+    expect(review.message).to_have_text("Fix the highlighted problems before saving.")
+    card.get_by_role("textbox", name="Reference runway").fill("14")
     review.leave_field()
     review.press("s")
     expect(review.message).to_have_text(f"Saved {MSN} as edited.")
     assert gold_db.reviews(MSN)[0]["extraction"] == extraction(
-        effect(
-            None,
-            obstacle=obstacle(heightAGL=length(100), latitude=40.651667, longitude=-73.825278),
-        )
+        obstacles=[obstacle(height(100, "ft", "MSL"), length(1.2, "nm"), reference("threshold", "14"), 270)]
     )
 
 
-def test_a_bad_dms_position_explains_itself(review):
+def test_a_distance_needs_a_reference(review, gold_db):
     review.go_to(MSN)
-    review.page.get_by_role("button", name="Add effect").click()
-    card = review.effect(1)
-    card.get_by_label("Obstacle").check()
-    card.get_by_label("Paste a DMS position").fill("nonsense")
-    card.get_by_label("Paste a DMS position").press("Tab")
-    expect(review.message).to_have_text("That isn't a DMS position like 403906N0734931W.")
+    review.page.get_by_role("button", name="Add obstacle").click()
+    card = review.obstacle(1)
+    review.field("Distance", card).get_by_label("Stated").check()
+    card.get_by_role("spinbutton", name="Distance").fill("0.5")
+    review.leave_field()
+    expect(review.field("Distance from", card).locator(".problem")).to_have_text(
+        "A distance and its reference come as a pair"
+    )
+    review.press("s")
+    expect(review.message).to_have_text("Fix the highlighted problems before saving.")
+    assert gold_db.reviews(MSN) == []
 
 
 def test_cancellations_keep_their_flag(review, gold_db):
@@ -313,8 +330,8 @@ def test_cancellations_keep_their_flag(review, gold_db):
 def test_a_cancellation_with_effects_is_rejected(review):
     review.go_to(TPA)
     review.page.get_by_role("button", name="Add effect").click()
-    review.choose_closure("full", review.effect(1))
-    expect(review.page.locator("form > .problem")).to_have_text("A cancelled NOTAM has no effects")
+    review.choose_closure("both", review.effect(1))
+    expect(review.page.locator("form > .problem").first).to_have_text("A cancelled NOTAM has no effects")
 
 
 def test_help_overlay_opens_and_closes(review):
@@ -328,11 +345,11 @@ def test_help_overlay_opens_and_closes(review):
 
 def test_shortcuts_work_after_picking_a_closure_and_arrows_never_change_it(review, gold_db):
     review.go_to(ORD)
-    review.choose_closure("partial", review.effect(1))
+    review.choose_closure("landing", review.effect(1))
     review.press("ArrowDown")
     review.press("s")
     review.expect_on(after(ORD))
-    assert gold_db.reviews(ORD)[-1]["extraction"]["effects"][0]["closure"] == "partial"
+    assert gold_db.reviews(ORD)[-1]["extraction"]["effects"][0]["closure"] == "landing"
 
 
 def test_shortcuts_do_not_fire_while_typing(review, gold_db):
@@ -352,7 +369,9 @@ def test_a_review_overtaken_by_new_rules_comes_back_for_re_review(review, gold_d
     banner = review.page.get_by_role("note")
     expect(banner).to_contain_text("The labelling rules changed after this was saved as accepted.")
     expect(banner).to_contain_text("effects[B:0]")
-    expect(review.page.get_by_role("textbox", name="Runway")).to_have_value("10L/28R")
+    runways = review.page.get_by_role("textbox", name="Runway")
+    expect(runways.nth(0)).to_have_value("10L")
+    expect(runways.nth(1)).to_have_value("28R")
 
     banner.get_by_role("button", name="Restore my saved label").click()
     expect(review.page.get_by_text("No effects.")).to_be_visible()
@@ -390,26 +409,32 @@ def test_a_link_opens_a_particular_notam(review):
     review.expect_on(JNU)
 
 
-def test_closed_end_offers_relative_ends_compass_points_and_runway_ends(review, gold_db):
+def test_partial_closure_end_offers_relative_ends_compass_points_and_runway_ends(review, gold_db):
     review.go_to(DTW)
-    closed_end = review.page.get_by_role("combobox", name="Closed end")
-    expect(closed_end).to_have_value("W")
-    closed_end.select_option(label="Departure end (LAST)")
-    expect(review.field("Closed end").locator(".problem")).to_have_text(
-        "departureEnd requires a single-direction runway"
-    )
-    closed_end.select_option(label="Runway end…")
-    review.page.get_by_role("textbox", name="Closed runway end").fill("27l")
+    card = review.effect(1)
+    end = card.get_by_role("combobox", name="End")
+    expect(end).to_have_value("W")
+    end.select_option(label="Departure end (LAST)")
+    expect(review.field("End", card).locator(".problem")).to_be_hidden()
+    end.select_option(label="Runway end…")
+    card.get_by_role("textbox", name="Runway end").fill("27l")
     review.leave_field()
     review.press("s")
     expect(review.message).to_have_text(f"Saved {DTW} as edited.")
-    assert gold_db.reviews(DTW)[-1]["extraction"]["effects"][0]["closedEnd"] == "27L"
+    assert gold_db.reviews(DTW)[-1]["extraction"]["effects"][0]["partialClosure"]["end"] == "27L"
 
 
 def test_an_unfinished_runway_end_saves_as_not_stated(review, gold_db):
     review.go_to(DTW)
-    review.page.get_by_role("combobox", name="Closed end").select_option(label="Runway end…")
+    review.effect(1).get_by_role("combobox", name="End").select_option(label="Runway end…")
     review.leave_field()
     review.press("s")
     expect(review.message).to_have_text(f"Saved {DTW} as edited.")
-    assert gold_db.reviews(DTW)[-1]["extraction"]["effects"][0]["closedEnd"] is None
+    assert gold_db.reviews(DTW)[-1]["extraction"]["effects"][0]["partialClosure"]["end"] is None
+
+
+def test_a_runway_must_be_a_single_direction(review):
+    review.go_to(DTW)
+    card = review.effect(1)
+    card.get_by_role("textbox", name="Runway").fill("09R/27L")
+    expect(review.field("Runway", card).locator(".problem")).to_contain_text("does not match")
