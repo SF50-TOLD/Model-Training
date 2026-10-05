@@ -205,6 +205,8 @@ These steps use the `notam-train` virtualenv (`pip install -r training/requireme
 2. `python -m training.train --out data/models/<name>` fine-tunes; the lowest validation loss wins.
 3. `python -m training.evaluate --model data/models/<name> --samples eval/notam_dev.jsonl` scores the
    model field by field on the dev half; tune on the dev half only.
+4. `python -m conversion.convert data/models/<name> data/models/<name>-coreai --quantize int8b32`
+   writes the folder the app loads. Block-wise int8 matches fp16 on the dev half; int4 doesn't.
 
 ## Tests
 
