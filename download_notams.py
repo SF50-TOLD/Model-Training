@@ -7,6 +7,10 @@ are still current, so the corpus merges every raw download (newest first)
 and then the legacy data/all_notams.json; a NOTAM that has since expired stays
 in the corpus. Raw downloads and the legacy snapshot are read, never written.
 
+The published datasets in data/external/ (see notam_gold/external.py) are downloaded once and
+merged last, so the API's text wins on a duplicate. The Polytechnique Montréal dataset has no
+license; it is downloaded and merged only with --include-unlicensed.
+
 With --holdout, it instead saves only NOTAMs that no raw download, the corpus or
 an earlier holdout collection has, to data/holdout/notams_<date>T<time>.jsonl.gz.
 These are the pool for a fresh held-out test set: data/holdout/ is never merged
@@ -25,7 +29,7 @@ from datetime import date, datetime
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from notam_gold import corpus
+from notam_gold import corpus, external, rewrite
 from notam_gold import strata as s
 from notam_gold.paths import CORPUS, DATA_DIR, HOLDOUT_DIR, LEGACY_SNAPSHOT
 from notam_gold.selection import Candidate, collapse_reissues
@@ -105,6 +109,9 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--skip-download", action="store_true", help="re-merge an existing download")
     mode.add_argument("--holdout", action="store_true", help="save new NOTAMs to data/holdout/ instead")
+    parser.add_argument(
+        "--include-unlicensed", action="store_true", help="also merge the Polytechnique Montréal dataset (no license)"
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -117,15 +124,23 @@ def main():
         fresh = download(api_client())
         corpus.write_jsonl_gz(raw_path, fresh.values())
         print(f"Wrote {len(fresh):,} NOTAMs to {raw_path}")
+        external.fetch(args.include_unlicensed)
 
     downloads = sorted(DATA_DIR.glob("notams_*.jsonl.gz"), reverse=True)
     legacy = json.loads(LEGACY_SNAPSHOT.read_text(encoding="utf-8")) if LEGACY_SNAPSHOT.exists() else []
-    merged = corpus.merge(
+    api = corpus.merge(
         *(_snapshot_records(path) for path in downloads),
         (corpus.corpus_record(n, "2025-11") for n in legacy),
     )
+    imported = external.imports(rewrite.domestic_locations(api), args.include_unlicensed)
+    for source in imported:
+        print(source.summary())
+    merged = corpus.merge(api, *(source.records for source in imported))
     corpus.write_jsonl_gz(CORPUS, merged)
-    print(f"Merged corpus: {len(merged):,} NOTAMs ({len(downloads)} downloads, {len(legacy):,} legacy) → {CORPUS}")
+    print(
+        f"Merged corpus: {len(merged):,} NOTAMs ({len(downloads)} downloads, {len(legacy):,} legacy, "
+        f"{len(merged) - len(api):,} external) → {CORPUS}"
+    )
 
 
 def _snapshot_records(path):

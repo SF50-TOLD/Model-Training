@@ -13,13 +13,11 @@ its accountability header and validity times.
 """
 
 import random
-import re
-from collections import Counter
 from collections.abc import Iterable, Iterator
 
 import openpyxl
 
-from notam_gold import corpus
+from notam_gold import corpus, rewrite
 from notam_gold import strata as s
 from notam_gold.paths import EXTERNAL_DIR, HOLDOUT_DIR
 from notam_gold.selection import Candidate, collapse_reissues, sample
@@ -53,66 +51,10 @@ ADDITION_QUOTAS = {
     s.PLAUSIBLE_NEGATIVE: 10,
 }
 
-ICAO_HEADER = re.compile(r"^([A-Z])(\d{4})(\d{2})\s+NOTAM([NRC])\b")
-ICAO_ITEM = {item: re.compile(rf"\b{item}\)\s*(\w+)") for item in "ABC"}
-ICAO_TEXT = re.compile(r"\bE\)\s*(.*?)(?:\s+[FG]\).*)?\s*$", re.DOTALL)
-DOMESTIC = re.compile(r"^!(\w+) (\d+) (\w+) (.*?)\s*(\d{10})-(\d{10}|PERM)(?:EST)?\s*$", re.DOTALL)
-
-
-def _timestamp(value: str | None) -> str | None:
-    """An ICAO ``yymmddhhmm`` time as ISO 8601 UTC; None for PERM or a missing time."""
-    if not value or not value[:10].isdigit():
-        return None
-    return f"20{value[:2]}-{value[2:4]}-{value[4:6]}T{value[6:8]}:{value[8:10]}:00Z"
-
-
-def _item(raw: str, item: str) -> str | None:
-    return match.group(1) if (match := ICAO_ITEM[item].search(raw)) else None
-
 
 def zenodo_record(location: str, raw: str, domestic_locations: dict[str, str]) -> dict | None:
     """A Zenodo NOTAM as a corpus record, or None when its text or ICAO location can't be recovered."""
-    raw = raw.strip()
-    if header := ICAO_HEADER.match(raw):
-        series, number, year, kind = header.groups()
-        location = _item(raw, "A") or location.strip()
-        text = raw if kind == "C" else (body.group(1) if (body := ICAO_TEXT.search(raw)) else "")
-        notam_id, start, end = f"{series}{number}/{year}", _item(raw, "B"), _item(raw, "C")
-    elif domestic := DOMESTIC.match(raw):
-        accountability, number, designator, body, start, end = domestic.groups()
-        location = domestic_locations.get(designator)
-        text, notam_id, kind = f"{designator} {body}", f"{accountability} {number}", "N"
-    else:
-        return None
-    if not text or not location:
-        return None
-    return {
-        "id": corpus.identity({"icao_location": location, "notam_id": notam_id}),
-        "notam_id": notam_id,
-        "icao_location": location,
-        "effective_start": _timestamp(start),
-        "effective_end": _timestamp(end),
-        "notam_text": text,
-        "nms_type": kind,
-        "source": ZENODO_SOURCE,
-    }
-
-
-def domestic_locations(records: Iterable[dict]) -> dict[str, str]:
-    """FAA designators (``SFO``) mapped to ICAO locations (``KSFO``) wherever the corpus pairs them consistently."""
-    pairs = Counter()
-    for record in records:
-        words = record["notam_text"].split(maxsplit=1)
-        if words and 3 <= len(words[0]) <= 4 and words[0].isalnum():
-            pairs[words[0], record["icao_location"]] += 1
-    totals = Counter()
-    for (designator, _), count in pairs.items():
-        totals[designator] += count
-    return {
-        designator: location
-        for (designator, location), count in pairs.items()
-        if count >= 3 and count / totals[designator] >= 0.9
-    }
+    return rewrite.message_record(location, raw, domestic_locations, ZENODO_SOURCE)
 
 
 def zenodo_records(locations: dict[str, str]) -> Iterator[dict]:

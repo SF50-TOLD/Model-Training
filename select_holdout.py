@@ -13,7 +13,7 @@ import argparse
 import sqlite3
 from collections import Counter
 
-from notam_gold import corpus, db, holdout
+from notam_gold import corpus, db, holdout, rewrite
 from notam_gold import strata as s
 from notam_gold.paths import CORPUS, HOLDOUT_DATABASE
 
@@ -74,7 +74,7 @@ def main():
     api_records = {r["id"]: r for r in holdout.api_records() if r["id"] not in taken}
     zenodo_records = {
         r["id"]: r
-        for r in holdout.zenodo_records(holdout.domestic_locations(corpus_records))
+        for r in holdout.zenodo_records(rewrite.domestic_locations(corpus_records))
         if r["id"] not in api_records and r["id"] not in taken
     }
     seed, quotas = (holdout.ADDITION_SEED, holdout.ADDITION_QUOTAS) if args.append else (holdout.SEED, holdout.QUOTAS)

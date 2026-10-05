@@ -49,6 +49,14 @@ cp .env.example .env      # then fill in ANTHROPIC_API_KEY and NOTAM_API_TOKEN
 
 Downloads every NOTAM from the NOTAM API into `data/notams_<date>.jsonl.gz`. It pages by keyset on `effective_start`, because deep offsets time out on the server. It then merges the download with the legacy snapshot `data/all_notams.json` into `data/corpus.jsonl.gz`.
 
+The corpus also takes NOTAMs from published datasets, downloaded once to `data/external/<source>/` and merged after the API's, so the API's text wins on a duplicate:
+
+- [NOTAM-Evolve](https://github.com/Estrellajer/NOTAM-Evolve) (Apache 2.0): runway, taxiway, lighting and area NOTAMs from 2024.
+- [DEEL-AI/NOTAM](https://huggingface.co/datasets/DEEL-AI/NOTAM) (MIT): E) items without locations. Only the few whose text names its location are kept.
+- Polytechnique Montréal's [`NOTAM_data.xlsx`](https://github.com/krooonal/NOTAM_explainable_prediction_data), about 21,000 ICAO NOTAMs mostly from 2020. **It has no license**, so it is downloaded and merged only with `--include-unlicensed`.
+
+Their texts are rewritten into the form the API serves (`notam_gold/external.py`). A NOTAM whose ICAO location can't be recovered is skipped, because the model's prompt starts with it.
+
 `notam_id` alone isn't unique, because series numbers repeat between countries. NOTAMs are therefore identified by location plus `notam_id`, and deduplicated on that and then on their content. To re-merge without downloading again, pass `--skip-download`.
 
 `./download_notams.py --holdout` collects NOTAMs for a fresh held-out test set. It saves only NOTAMs that nothing local has yet, to `data/holdout/`, and prints how many usable displaced-threshold, partial-closure and declared-distance NOTAMs the holdout has. Those strata are the scarce ones. `data/holdout/` is never merged into the corpus, so training never sees these NOTAMs. Run it at least every few weeks, because the API drops NOTAMs 30 days after they expire.
