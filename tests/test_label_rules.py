@@ -13,6 +13,27 @@ def test_an_aerodrome_obstacle_is_kept():
     assert corrected(label, "TOWER CRANE APRX 430FT BFR THR 24L. 315FT AGL 375FT AMSL.") == label
 
 
+def test_a_closure_at_stated_times_is_not_a_closure():
+    label = extraction(effect("01", "both"), effect("19", "both"))
+    assert corrected(label, "RWY 01/19 CLSD DLY 0401-0900") == extraction()
+    assert corrected(label, "RWY 01/19 CLSD EXC XNG AND TAX DLY 0400-0900") == extraction()
+    assert corrected(label, "RWY 01/19 CLSD 2610040600-2610051800") == label
+
+
+def test_a_closure_whose_exceptions_include_the_sf50_is_not_a_closure():
+    label = extraction(effect("27", "both"))
+    assert corrected(label, "RWY 27 CLSD EXC TKOF AND ACFT WINGSPAN LESS THAN 119FT") == extraction()
+    assert corrected(label, "RWY 27 CLSD EXC ACFT WINGSPAN LESS THAN 24FT") == label
+
+
+def test_a_published_obstacle_list_in_takeoff_minimum_notes_records_no_obstacle():
+    label = extraction(obstacles=[obstacle(height=height(674, datum="MSL"))])
+    notes = "OBST DEPARTURE PROCEDURE RUNWAY 01 TAKE OFF MINIMUM NOTES: OBSTACLES TREE 3327 FT FROM DER, 674 FT MSL"
+    assert corrected(label, notes) == extraction()
+    temporary = "ODP ELLINGTON. TAKEOFF OBSTACLE NOTES: RWY 35R, TEMPORARY CRANE, 2338FT FROM DER, 180FT MSL"
+    assert corrected(label, temporary) == label
+
+
 def test_a_closure_after_the_last_scheduled_flight_is_not_a_closure():
     label = extraction(effect("16", "both"), effect("34", "both"))
     text = "RWY 16/34 CLSD AFTER LAST SKED INTL ARR DUE WIP. AVBL WITH 60 MIN PN TO ATC"
