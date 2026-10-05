@@ -1,4 +1,4 @@
-"""Build the training and validation sets from silver labels.
+"""Build the model's training and validation sets from silver labels.
 
 A NOTAM's label is kept when:
 
@@ -8,11 +8,13 @@ A NOTAM's label is kept when:
 Labels come from the training database and from the gold candidates that aren't gold (both runs agree
 on all of them, and none shares a reissue template or text with a gold NOTAM). Every label must
 validate against the schema. The completion is the canonical extraction as compact JSON with keys in
-schema order.
+schema order — exactly the text the on-device decoder emits.
 
 Labels then follow the conventions both runs get wrong alike (label_rules.py). Validation is carved
 from training by reissue template, never from the gold set:
-**nothing from notam_dev or notam_test is ever written here.**
+**nothing from notam_dev or notam_test is ever written here.** Training NOTAMs in the scarce numeric
+strata also get label-preserving variants (augment.py), and training gets synthetic NOTAMs for a
+pattern the corpus has no usable examples of (synthetic.py); validation gets neither.
 
     python -m training.build_dataset
 """
@@ -20,6 +22,7 @@ from training by reissue template, never from the gold set:
 import argparse
 import hashlib
 import json
+import random
 import sqlite3
 from collections import Counter
 
@@ -30,12 +33,17 @@ from notam_gold.migrate import current
 from notam_gold.paths import DATABASE, EVAL_DIR
 from notam_gold.prompt import build_prompt
 from notam_gold.schema import canonicalize, validate
+from training import synthetic
+from training.augment import variants
 from training.label_rules import corrected
 from training.paths import DATASET_DIR, TRAINING_DATABASE
 from training.select_training import DUAL_RUN_STRATA, normalized_text
 
 VALIDATION_SHARE = 0.05
 SPLIT_SALT = "notam-train-split-v1"
+AUGMENT_SEED = 2027
+# The strata whose numeric fields the corpus has fewest examples of.
+AUGMENTED_STRATA = {s.DISPLACED_THRESHOLD, s.PARTIAL_CLOSURE, s.DECLARED_DISTANCES}
 
 EFFECT_KEYS = ("runway", "closure", "partialClosure", "thresholdDisplacement", "declaredDistances", "surfaceCondition")
 MEASURE_KEYS = ("value", "unit")
@@ -157,7 +165,11 @@ def is_validation(notam: sqlite3.Row) -> bool:
 
 
 def main():
-    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--variants", type=int, default=5, help="augmented variants per scarce training NOTAM")
+    parser.add_argument("--synthetic", type=int, default=80, help="synthetic NOTAMs added to training")
+    args = parser.parse_args()
+    rng = random.Random(AUGMENT_SEED)
     gold = gold_keys()
     with db.connect(TRAINING_DATABASE) as connection:
         examples = training_labels(connection, exclude=gold) + non_gold_candidates(gold)
@@ -176,14 +188,30 @@ def main():
                 skipped["invalid"] += 1
                 continue
             split = "val" if is_validation(notam) else "train"
+            prompt = build_prompt(notam["icao_location"], notam["notam_text"])
+            rows = [(prompt, label)]
+            if split == "train" and notam["selected_stratum"] in AUGMENTED_STRATA:
+                rows += variants(prompt, label, args.variants, rng)
+            for text, extraction in rows:
+                row = {
+                    "notamKey": notam["id"],
+                    "stratum": notam["selected_stratum"],
+                    "prompt": text,
+                    "completion": completion(extraction),
+                }
+                (val if split == "val" else train).write(json.dumps(row, ensure_ascii=False) + "\n")
+                counts[(split, notam["selected_stratum"])] += 1
+        for index, (prompt, label) in enumerate(synthetic.examples(args.synthetic, rng)):
+            if problems := validate(label):
+                raise SystemExit(f"synthetic example {index} is invalid: {problems}")
             row = {
-                "notamKey": notam["id"],
-                "stratum": notam["selected_stratum"],
-                "prompt": build_prompt(notam["icao_location"], notam["notam_text"]),
+                "notamKey": f"synthetic {index}",
+                "stratum": synthetic.STRATUM,
+                "prompt": prompt,
                 "completion": completion(label),
             }
-            (val if split == "val" else train).write(json.dumps(row, ensure_ascii=False) + "\n")
-            counts[(split, notam["selected_stratum"])] += 1
+            train.write(json.dumps(row, ensure_ascii=False) + "\n")
+            counts[("train", synthetic.STRATUM)] += 1
     for split in ("train", "val"):
         by_stratum = {k[1]: v for k, v in counts.items() if k[0] == split}
         print(f"{split}: {sum(by_stratum.values()):,}  {by_stratum}")

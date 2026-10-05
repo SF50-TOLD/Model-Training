@@ -190,6 +190,22 @@ repository root.
    n-grams of the NOTAM text, gates it on recall over the reviewed sets (a missed NOTAM still appears,
    only lower), and writes its weights, a manifest and a parity file the app's Swift port tests against.
 
+## The full-schema model (speculative)
+
+This branch also fine-tunes Qwen3-0.6B to read every field of the schema from free-text NOTAMs, for
+an Auto-Fill the app has parked. The model writes the compact reading format in
+`training/reading_format.py` (the app decodes the same format), never the schema's JSON. It trains
+on the same training set as the relevance classifier, plus label-preserving variants of the scarce
+numeric strata (`training/augment.py`) and synthetic NOTAMs for a pattern the corpus lacks
+(`training/synthetic.py`), which `build_dataset` adds to the training split.
+
+These steps use the `notam-train` virtualenv (`pip install -r training/requirements.txt`):
+
+1. `python -m training.build_dataset` writes the training set with its variants and synthetic NOTAMs.
+2. `python -m training.train --out data/models/<name>` fine-tunes; the lowest validation loss wins.
+3. `python -m training.evaluate --model data/models/<name> --samples eval/notam_dev.jsonl` scores the
+   model field by field on the dev half; tune on the dev half only.
+
 ## Tests
 
 ```bash

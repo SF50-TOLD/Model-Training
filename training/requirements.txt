@@ -1,0 +1,10 @@
+# The notam-train virtualenv: fine-tuning (MLX) and Core AI conversion. Labelling and dataset
+# building also need the notam-gold requirements (../requirements.txt), installed alongside.
+-r ../requirements.txt
+mlx==0.32.2
+mlx-lm==0.31.3
+torch==2.13.0
+transformers==5.17.0
+safetensors==0.8.0
+huggingface_hub==1.33.0
+coreai-torch==0.4.3
